@@ -21,18 +21,16 @@ public struct NullWorkload: BorrowingWorkload {
     public init() {}
 
     public var identifier: WorkloadID {
-        // Synthesize a stable WorkloadID. `op` reuses .dot as a sentinel
-        // (the closed enum doesn't have a `.null` case and adding one would
-        // ripple through ULP tables); `impl == .naive` and a distinguishing
-        // param ("benchmark:self") keep it dedup-able from real dot ops.
+        // OpKind.null is the dedicated sentinel for the harness self-bench.
+        // It is excluded from every real chart filter by construction.
         let params = try! CanonicalParams(
-            ["benchmark": "self"],
+            [:],
             impl: .naive,
-            op: .dot,
+            op: .null,
             shape: .vector(n: 1)
         )
         return WorkloadID(
-            op: .dot,
+            op: .null,
             impl: .naive,
             implClass: .standard,
             dtype: .f32,

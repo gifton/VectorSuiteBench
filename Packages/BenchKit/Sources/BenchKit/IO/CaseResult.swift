@@ -16,10 +16,15 @@ public struct CaseResult: Codable, Sendable {
     public let amortized: AmortizedResult?
 
     /// Derived: GB/s from Amortized median (sub-1 % overhead-corrected).
-    public let bandwidthGBPerSec: Double
+    /// `nil` when no Amortized samples were collected — single-shot data is
+    /// **never** used as a fallback per §2.3 / BandwidthEstimator's contract:
+    /// at the Apple Silicon ~41.6 ns timebase resolution, per-sample
+    /// arithmetic on single-shot data produces nonsense at the noise floor.
+    public let bandwidthGBPerSec: Double?
 
-    /// Derived: GFLOP/s from Amortized median.
-    public let gflops: Double
+    /// Derived: GFLOP/s from Amortized median. `nil` when no Amortized
+    /// samples were collected (see `bandwidthGBPerSec`).
+    public let gflops: Double?
 
     /// `mach_task_basic_info().resident_size` snapshot before sampling.
     public let preSampleRSS: UInt64
@@ -50,8 +55,8 @@ public struct CaseResult: Codable, Sendable {
         id: WorkloadID,
         singleShot: LatencyDistribution?,
         amortized: AmortizedResult?,
-        bandwidthGBPerSec: Double,
-        gflops: Double,
+        bandwidthGBPerSec: Double?,
+        gflops: Double?,
         preSampleRSS: UInt64,
         postSampleRSS: UInt64,
         memoryTrace: [MemorySample],

@@ -28,5 +28,6 @@ public func ulpTolerance(op: OpKind, implClass: ImplClass, shape: Shape) -> UInt
     case (.distanceMatrix, .standard):       return 8   + 4  * logN
     case (.distanceMatrix, .approximate):    return 128 + 32 * logN
     case (.topK, _):                         return 0  // set-based verification; no ULP window
+    case (.null, _):                         return 0  // NullWorkload self-bench has no semantic output
     }
 }

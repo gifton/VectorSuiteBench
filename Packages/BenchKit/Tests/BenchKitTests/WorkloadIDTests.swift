@@ -54,6 +54,60 @@ struct WorkloadIDTests {
         #expect(decoded.canonicalString == id.canonicalString)
     }
 
+    @Test("Decoder re-validates params; tampered JSON throws")
+    func decoderRevalidates() {
+        // Hand-crafted JSON with a non-canonical (uppercase) param key.
+        // The encoder would never produce this; only a hand edit or a buggy
+        // migration could. Decoder must reject.
+        let tampered = #"""
+        {
+          "op": "dot",
+          "impl": "vectorCore",
+          "implClass": "standard",
+          "dtype": "f32",
+          "shape": {"vector": {"n": 512}},
+          "params": {"VectorFlavor": "optimized"}
+        }
+        """#.data(using: .utf8)!
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(WorkloadID.self, from: tampered)
+        }
+    }
+
+    @Test("Decoder rejects vectorflavor on non-VectorCore impls")
+    func decoderRejectsForbiddenFlavor() {
+        let tampered = #"""
+        {
+          "op": "dot",
+          "impl": "accelerate",
+          "implClass": "standard",
+          "dtype": "f32",
+          "shape": {"vector": {"n": 512}},
+          "params": {"vectorflavor": "optimized"}
+        }
+        """#.data(using: .utf8)!
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(WorkloadID.self, from: tampered)
+        }
+    }
+
+    @Test("Decoder rejects missing vectorflavor on VectorCore vector ops")
+    func decoderRejectsMissingFlavor() {
+        let tampered = #"""
+        {
+          "op": "dot",
+          "impl": "vectorCore",
+          "implClass": "standard",
+          "dtype": "f32",
+          "shape": {"vector": {"n": 512}},
+          "params": {}
+        }
+        """#.data(using: .utf8)!
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(WorkloadID.self, from: tampered)
+        }
+    }
+
     @Test("WorkloadID canonicalString is stable")
     func canonicalStringStable() throws {
         let p = try CanonicalParams(["vectorflavor": "optimized"], impl: .vectorCore, op: .dot, shape: .vector(n: 256))

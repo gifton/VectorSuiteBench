@@ -23,8 +23,8 @@ struct RunnerSmokeTests {
         #expect(amortized.iterationsPerBatch > 0)
         #expect((amortized.nanosPerOp ?? 0) > 0)
 
-        #expect(result.bandwidthGBPerSec > 0)
-        #expect(result.gflops > 0)
+        #expect((result.bandwidthGBPerSec ?? 0) > 0)
+        #expect((result.gflops ?? 0) > 0)
         #expect(!result.flags.contains(.truncated))
     }
 

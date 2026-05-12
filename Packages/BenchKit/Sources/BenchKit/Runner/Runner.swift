@@ -98,9 +98,9 @@ public struct Runner: Sendable {
 
         let postRSS = readResidentSize()
 
-        let nanosPerOp = amortized?.nanosPerOp ?? Double(singleShot?.p50 ?? 0)
-        let bandwidth = BandwidthEstimator.gbPerSec(bytesMoved: workload.bytesMoved, nanosPerOp: nanosPerOp)
-        let gflops = BandwidthEstimator.gflops(flops: workload.flops, nanosPerOp: nanosPerOp)
+        let (bandwidth, gflops) = Self.deriveThroughput(
+            amortized: amortized, workload: workload
+        )
 
         if singleShot?.looksBimodal == true {
             flags.insert(.bimodal)
@@ -118,12 +118,27 @@ public struct Runner: Sendable {
             gflops: gflops,
             preSampleRSS: preRSS,
             postSampleRSS: postRSS,
-            memoryTrace: [],  // Continuous trace not yet implemented; snapshot-only for now.
+            memoryTrace: [],
             thermalEvents: thermalEvents,
             timerOverheadNanos: timerOverheadNanos,
             verification: verification,
             flags: flags,
             runID: runID
+        )
+    }
+
+    /// Derive GB/s and GFLOP/s **only** from the Amortized median. Returns
+    /// `(nil, nil)` when no Amortized data exists — single-shot is never a
+    /// fallback (per §2.3 / BandwidthEstimator's contract).
+    private static func deriveThroughput<W: WorkloadMetadata>(
+        amortized: AmortizedResult?, workload: W
+    ) -> (bandwidth: Double?, gflops: Double?) {
+        guard let nanosPerOp = amortized?.nanosPerOp, nanosPerOp > 0 else {
+            return (nil, nil)
+        }
+        return (
+            BandwidthEstimator.gbPerSec(bytesMoved: workload.bytesMoved, nanosPerOp: nanosPerOp),
+            BandwidthEstimator.gflops(flops: workload.flops, nanosPerOp: nanosPerOp)
         )
     }
 
@@ -307,9 +322,7 @@ public struct Runner: Sendable {
             : nil
 
         let postRSS = readResidentSize()
-        let nanosPerOp = amortized?.nanosPerOp ?? Double(singleShot?.p50 ?? 0)
-        let bandwidth = BandwidthEstimator.gbPerSec(bytesMoved: workload.bytesMoved, nanosPerOp: nanosPerOp)
-        let gflops = BandwidthEstimator.gflops(flops: workload.flops, nanosPerOp: nanosPerOp)
+        let (bandwidth, gflops) = Self.deriveThroughput(amortized: amortized, workload: workload)
 
         if singleShot?.looksBimodal == true { flags.insert(.bimodal) }
         if postRSS > preRSS + 10 * 1024 * 1024 { flags.insert(.memoryGrowth) }
@@ -450,8 +463,8 @@ public struct Runner: Sendable {
             id: workload.identifier,
             singleShot: nil,
             amortized: nil,
-            bandwidthGBPerSec: 0,
-            gflops: 0,
+            bandwidthGBPerSec: nil,
+            gflops: nil,
             preSampleRSS: 0,
             postSampleRSS: 0,
             memoryTrace: [],
@@ -474,13 +487,13 @@ public struct Runner: Sendable {
         verification: VerificationResult,
         flags: Set<CaseFlag>
     ) -> CaseResult {
-        let nanosPerOp = amortized?.nanosPerOp ?? Double(singleShot?.p50 ?? 0)
+        let (bandwidth, gflops) = Self.deriveThroughput(amortized: amortized, workload: workload)
         return CaseResult(
             id: workload.identifier,
             singleShot: singleShot,
             amortized: amortized,
-            bandwidthGBPerSec: BandwidthEstimator.gbPerSec(bytesMoved: workload.bytesMoved, nanosPerOp: nanosPerOp),
-            gflops: BandwidthEstimator.gflops(flops: workload.flops, nanosPerOp: nanosPerOp),
+            bandwidthGBPerSec: bandwidth,
+            gflops: gflops,
             preSampleRSS: preRSS,
             postSampleRSS: postRSS,
             memoryTrace: memoryTrace,

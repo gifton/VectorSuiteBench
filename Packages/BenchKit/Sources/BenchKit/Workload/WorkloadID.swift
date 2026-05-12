@@ -14,6 +14,10 @@ public enum OpKind: String, Codable, Hashable, Sendable, CaseIterable {
     case topK
     case pairwiseDistances
     case distanceMatrix
+    /// Sentinel op for `NullWorkload` (the harness self-bench). Never appears
+    /// in real benchmark cases; filters that key on `.op == .dot` etc. will
+    /// not accidentally pick up the floor measurement.
+    case null
 }
 
 // MARK: - ImplKind
@@ -82,7 +86,7 @@ public enum Shape: Hashable, Codable, Sendable {
 /// - For `op == .dot` on `impl == .vectorCore`: `api` (`raw` | `metric`)
 ///   distinguishes `Vector.dot()` (returns +a·b) from `DotProductDistance`
 ///   (returns −a·b).
-public struct CanonicalParams: Hashable, Codable, Sendable {
+public struct CanonicalParams: Hashable, Encodable, Sendable {
     /// Backing storage: keys are lowercased, values are arbitrary lowercase
     /// strings. Hashing/equality come from this Dictionary directly.
     private let entries: [String: String]
@@ -165,12 +169,15 @@ public struct CanonicalParams: Hashable, Codable, Sendable {
     public var keys: [String] { entries.keys.sorted() }
     public var isEmpty: Bool { entries.isEmpty }
 
-    // Codable: deterministic key order so equal CanonicalParams encode to
-    // equal JSON bytes (required for WorkloadID hash stability across runs).
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let dict = try container.decode([String: String].self)
-        self.entries = dict
+    /// Direct dictionary access (validated entries only). Used by the
+    /// validating decoder in `WorkloadID`.
+    public var rawEntries: [String: String] { entries }
+
+    /// Bypass-the-validator constructor used **only** by trusted code paths
+    /// (the encoder round-trip and tests). All public construction goes
+    /// through `init(_:impl:op:shape:)`.
+    internal init(unsafeEntries: [String: String]) {
+        self.entries = unsafeEntries
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -241,6 +248,57 @@ public struct WorkloadID: Hashable, Codable, Sendable {
         shape: Shape,
         params: CanonicalParams
     ) {
+        self.op = op
+        self.impl = impl
+        self.implClass = implClass
+        self.dtype = dtype
+        self.shape = shape
+        self.params = params
+    }
+
+    // MARK: - Codable
+
+    private enum CodingKeys: String, CodingKey {
+        case op, impl, implClass, dtype, shape, params
+    }
+
+    /// Encoding is straightforward — each field encodes via its own Codable
+    /// conformance. `CanonicalParams` writes its sorted-key dictionary form.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(op, forKey: .op)
+        try container.encode(impl, forKey: .impl)
+        try container.encode(implClass, forKey: .implClass)
+        try container.encode(dtype, forKey: .dtype)
+        try container.encode(shape, forKey: .shape)
+        try container.encode(params, forKey: .params)
+    }
+
+    /// Decoding re-runs `CanonicalParams`'s validating initializer using the
+    /// **just-decoded** impl / op / shape values, so a tampered, hand-edited,
+    /// or migration-emitted JSON cannot silently land non-canonical params
+    /// in the dedup index. A mismatch throws as `DecodingError.dataCorrupted`
+    /// rather than `ValidationError`, so callers using `JSONDecoder` see a
+    /// standard Swift error type.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let op = try container.decode(OpKind.self, forKey: .op)
+        let impl = try container.decode(ImplKind.self, forKey: .impl)
+        let implClass = try container.decode(ImplClass.self, forKey: .implClass)
+        let dtype = try container.decode(DType.self, forKey: .dtype)
+        let shape = try container.decode(Shape.self, forKey: .shape)
+        let rawParams = try container.decode([String: String].self, forKey: .params)
+        let params: CanonicalParams
+        do {
+            params = try CanonicalParams(rawParams, impl: impl, op: op, shape: shape)
+        } catch let validation as CanonicalParams.ValidationError {
+            throw DecodingError.dataCorruptedError(
+                forKey: .params,
+                in: container,
+                debugDescription: "Decoded params failed validation: \(validation). " +
+                    "This indicates a tampered or migration-bug WorkloadID."
+            )
+        }
         self.op = op
         self.impl = impl
         self.implClass = implClass

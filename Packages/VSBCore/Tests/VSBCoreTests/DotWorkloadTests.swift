@@ -87,7 +87,7 @@ struct DotWorkloadTests {
         #expect(single.count == 32)
         let amortized = try #require(result.amortized)
         #expect(amortized.iterationsPerBatch > 0)
-        #expect(result.gflops > 0)
-        #expect(result.bandwidthGBPerSec > 0)
+        #expect((result.gflops ?? 0) > 0)
+        #expect((result.bandwidthGBPerSec ?? 0) > 0)
     }
 }

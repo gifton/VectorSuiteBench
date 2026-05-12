@@ -90,9 +90,7 @@ public struct AsyncRunner: Sendable {
             : nil
 
         let postRSS = readResidentSize()
-        let nanosPerOp = amortized?.nanosPerOp ?? Double(singleShot?.p50 ?? 0)
-        let bandwidth = BandwidthEstimator.gbPerSec(bytesMoved: workload.bytesMoved, nanosPerOp: nanosPerOp)
-        let gflops = BandwidthEstimator.gflops(flops: workload.flops, nanosPerOp: nanosPerOp)
+        let (bandwidth, gflops) = Self.deriveThroughput(amortized: amortized, workload: workload)
 
         if singleShot?.looksBimodal == true { flags.insert(.bimodal) }
         if postRSS > preRSS + 10 * 1024 * 1024 { flags.insert(.memoryGrowth) }
@@ -227,6 +225,20 @@ public struct AsyncRunner: Sendable {
 
     // MARK: - Helpers
 
+    /// Same contract as Runner.deriveThroughput: only the Amortized median
+    /// yields bandwidth/gflops; single-shot is never a fallback.
+    static func deriveThroughput<W: WorkloadMetadata>(
+        amortized: AmortizedResult?, workload: W
+    ) -> (bandwidth: Double?, gflops: Double?) {
+        guard let nanosPerOp = amortized?.nanosPerOp, nanosPerOp > 0 else {
+            return (nil, nil)
+        }
+        return (
+            BandwidthEstimator.gbPerSec(bytesMoved: workload.bytesMoved, nanosPerOp: nanosPerOp),
+            BandwidthEstimator.gflops(flops: workload.flops, nanosPerOp: nanosPerOp)
+        )
+    }
+
     private func failedResult<W: WorkloadMetadata>(
         workload: W,
         verification: VerificationResult,
@@ -235,7 +247,7 @@ public struct AsyncRunner: Sendable {
         CaseResult(
             id: workload.identifier,
             singleShot: nil, amortized: nil,
-            bandwidthGBPerSec: 0, gflops: 0,
+            bandwidthGBPerSec: nil, gflops: nil,
             preSampleRSS: 0, postSampleRSS: 0,
             memoryTrace: [], thermalEvents: [],
             timerOverheadNanos: timerOverheadNanos,
@@ -254,7 +266,7 @@ public struct AsyncRunner: Sendable {
         CaseResult(
             id: workload.identifier,
             singleShot: nil, amortized: nil,
-            bandwidthGBPerSec: 0, gflops: 0,
+            bandwidthGBPerSec: nil, gflops: nil,
             preSampleRSS: preRSS, postSampleRSS: readResidentSize(),
             memoryTrace: [], thermalEvents: [],
             timerOverheadNanos: timerOverheadNanos,
