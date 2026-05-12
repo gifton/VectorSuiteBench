@@ -8,7 +8,14 @@ let package = Package(
         .library(name: "BenchKit", targets: ["BenchKit"]),
     ],
     targets: [
-        .target(name: "BenchKit"),
+        .target(
+            name: "BenchKitC",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "BenchKit",
+            dependencies: ["BenchKitC"]
+        ),
         .testTarget(
             name: "BenchKitTests",
             dependencies: ["BenchKit"]
