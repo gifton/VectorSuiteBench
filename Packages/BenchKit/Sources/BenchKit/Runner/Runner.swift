@@ -237,6 +237,208 @@ public struct Runner: Sendable {
         return oracle.compare(candidate, reference, window)
     }
 
+    // MARK: - MutatingWorkload
+
+    public func run<W: MutatingWorkload>(
+        _ workload: W,
+        cancellation: CancellationToken? = nil
+    ) -> CaseResult {
+        var flags: Set<CaseFlag> = []
+        if workload.identifier.implClass == .approximate {
+            flags.insert(.approximate)
+        }
+
+        // 1. Verification.
+        let baseSeed = SeedTable.seed(for: workload.identifier)
+        var rngForVerify = SplitMix64(seed: baseSeed)
+        let verification = verifyMutating(workload, rng: &rngForVerify)
+        if case .failed = verification {
+            return failedResult(workload: workload, verification: verification, flags: flags)
+        }
+
+        let preRSS = readResidentSize()
+
+        // 2. Build N inputs for single-shot (one per sample) + K inputs for Amortized.
+        var rngForInputs = SplitMix64(seed: baseSeed)
+        let singleShotN = sampleCount.singleShotMax
+        let amortizedTargetK = autoTuneKMutating(workload, baseSeed: baseSeed)
+        let totalK = Swift.max(singleShotN, amortizedTargetK)
+        var inputs = workload.makeInputs(count: totalK, rng: &rngForInputs)
+
+        // 3. Warm-up (rotates through whatever inputs are available).
+        warmUpMutating(workload, inputs: &inputs)
+        if cancellation?.isCancelled == true {
+            flags.insert(.truncated)
+            return makeResult(
+                workload: workload, singleShot: nil, amortized: nil,
+                preRSS: preRSS, postRSS: readResidentSize(),
+                memoryTrace: [], thermalEvents: [],
+                verification: verification, flags: flags
+            )
+        }
+
+        // 4. Thermal state.
+        let thermalStateAtStart = ProcessInfo.processInfo.thermalState
+        var thermalEvents: [ThermalEvent] = []
+
+        // 5a. Single-shot: rebuild inputs fresh (warm-up mutated them).
+        var rngForSingle = SplitMix64(seed: baseSeed &+ 1)
+        var singleInputs = workload.makeInputs(count: singleShotN, rng: &rngForSingle)
+        let singleShot = sampleSingleShotMutating(
+            workload, inputs: &singleInputs, cancellation: cancellation, flags: &flags
+        )
+
+        let thermalStateAfterSingleShot = ProcessInfo.processInfo.thermalState
+        if thermalStateAfterSingleShot != thermalStateAtStart {
+            thermalEvents.append(ThermalEvent(
+                timestampNanos: 0,
+                from: String(describing: thermalStateAtStart),
+                to: String(describing: thermalStateAfterSingleShot)
+            ))
+            flags.insert(.thermalEscalation)
+        }
+
+        // 5b. Amortized: rebuild K inputs fresh.
+        let amortized: AmortizedResult? = sampleCount.amortizedSamples > 0
+            ? sampleAmortizedMutating(
+                workload, K: amortizedTargetK, baseSeed: baseSeed &+ 2,
+                cancellation: cancellation, flags: &flags
+            )
+            : nil
+
+        let postRSS = readResidentSize()
+        let nanosPerOp = amortized?.nanosPerOp ?? Double(singleShot?.p50 ?? 0)
+        let bandwidth = BandwidthEstimator.gbPerSec(bytesMoved: workload.bytesMoved, nanosPerOp: nanosPerOp)
+        let gflops = BandwidthEstimator.gflops(flops: workload.flops, nanosPerOp: nanosPerOp)
+
+        if singleShot?.looksBimodal == true { flags.insert(.bimodal) }
+        if postRSS > preRSS + 10 * 1024 * 1024 { flags.insert(.memoryGrowth) }
+
+        return CaseResult(
+            id: workload.identifier,
+            singleShot: singleShot,
+            amortized: amortized,
+            bandwidthGBPerSec: bandwidth,
+            gflops: gflops,
+            preSampleRSS: preRSS,
+            postSampleRSS: postRSS,
+            memoryTrace: [],
+            thermalEvents: thermalEvents,
+            timerOverheadNanos: timerOverheadNanos,
+            verification: verification,
+            flags: flags,
+            runID: runID
+        )
+    }
+
+    private func warmUpMutating<W: MutatingWorkload>(_ workload: W, inputs: inout [W.Input]) {
+        guard !inputs.isEmpty else { return }
+        let start = clock.now()
+        let budgetNanos: UInt64 = 100_000_000
+        var iters = 0
+        repeat {
+            let idx = iters % inputs.count
+            let result = workload.invoke(&inputs[idx])
+            BlackHole.consume(result)
+            iters += 1
+        } while iters < 50 || clock.nanos(clock.now() &- start) < budgetNanos
+    }
+
+    private func sampleSingleShotMutating<W: MutatingWorkload>(
+        _ workload: W,
+        inputs: inout [W.Input],
+        cancellation: CancellationToken?,
+        flags: inout Set<CaseFlag>
+    ) -> LatencyDistribution? {
+        let n = inputs.count
+        guard n > 0 else { return nil }
+        var samples = [UInt64](repeating: 0, count: n)
+        for i in 0..<n {
+            if cancellation?.isCancelled == true {
+                flags.insert(.truncated)
+                return LatencyDistribution(samples: Array(samples.prefix(i)))
+            }
+            let t0 = clock.now()
+            let result = workload.invoke(&inputs[i])
+            let t1 = clock.now()
+            BlackHole.consume(result)
+            samples[i] = clock.nanos(t1 &- t0)
+        }
+        return LatencyDistribution(samples: samples)
+    }
+
+    private func sampleAmortizedMutating<W: MutatingWorkload>(
+        _ workload: W,
+        K: Int,
+        baseSeed: UInt64,
+        cancellation: CancellationToken?,
+        flags: inout Set<CaseFlag>
+    ) -> AmortizedResult? {
+        let samples = sampleCount.amortizedSamples
+        var loopNanos = [UInt64](repeating: 0, count: samples)
+        for i in 0..<samples {
+            if cancellation?.isCancelled == true {
+                flags.insert(.truncated)
+                return AmortizedResult(
+                    iterationsPerBatch: K,
+                    batchNanos: LatencyDistribution(samples: Array(loopNanos.prefix(i)))
+                )
+            }
+            // Fresh K inputs per sample so the loop never re-mutates the same buffer.
+            var rng = SplitMix64(seed: baseSeed &+ UInt64(i))
+            var inputs = workload.makeInputs(count: K, rng: &rng)
+            let t0 = clock.now()
+            for j in 0..<K {
+                let result = workload.invoke(&inputs[j])
+                BlackHole.consume(result)
+            }
+            let t1 = clock.now()
+            loopNanos[i] = clock.nanos(t1 &- t0)
+        }
+        return AmortizedResult(
+            iterationsPerBatch: K,
+            batchNanos: LatencyDistribution(samples: loopNanos)
+        )
+    }
+
+    private func autoTuneKMutating<W: MutatingWorkload>(_ workload: W, baseSeed: UInt64) -> Int {
+        let targetLoopNanos: UInt64 = 100_000
+        var probeK = 4
+        for _ in 0..<8 {
+            var rng = SplitMix64(seed: baseSeed &+ 0xA5A5)
+            var inputs = workload.makeInputs(count: probeK, rng: &rng)
+            let t0 = clock.now()
+            for j in 0..<probeK {
+                let result = workload.invoke(&inputs[j])
+                BlackHole.consume(result)
+            }
+            let t1 = clock.now()
+            let elapsed = clock.nanos(t1 &- t0)
+            if elapsed >= targetLoopNanos { return probeK }
+            let scale = elapsed == 0 ? 4 : Int((Double(targetLoopNanos) / Double(elapsed) * 1.25).rounded(.up))
+            probeK = Swift.min(probeK * Swift.max(scale, 2), 1_000_000)
+        }
+        return probeK
+    }
+
+    private func verifyMutating<W: MutatingWorkload>(_ workload: W, rng: inout SplitMix64) -> VerificationResult {
+        guard let oracle = workload.referenceOracle else {
+            return .unverifiable(reason: "no reference oracle declared")
+        }
+        var verifyInputs = workload.makeInputs(count: 1, rng: &rng)
+        // Build a snapshot of the input *before* mutation so the oracle sees
+        // the same pre-state the candidate did.
+        let snapshot = verifyInputs[0]
+        let candidate = workload.invoke(&verifyInputs[0])
+        let reference = oracle.compute(snapshot)
+        let window = ulpTolerance(
+            op: workload.identifier.op,
+            implClass: workload.identifier.implClass,
+            shape: workload.identifier.shape
+        )
+        return oracle.compare(candidate, reference, window)
+    }
+
     // MARK: - Result helpers
 
     private func failedResult<W: WorkloadMetadata>(
