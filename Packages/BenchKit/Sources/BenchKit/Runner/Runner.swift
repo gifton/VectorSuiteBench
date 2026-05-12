@@ -1,13 +1,20 @@
 import Foundation
 import Darwin.Mach
 
-/// Synchronous runner for `BorrowingWorkload` / `MutatingWorkload`. The async
-/// counterpart for `AsyncWorkload` lives in `AsyncRunner.swift`.
+/// Runner for `BorrowingWorkload` / `MutatingWorkload`. `AsyncRunner` lives
+/// alongside for `AsyncWorkload`.
 ///
 /// The runner is generic over the concrete workload type so the hot path uses
 /// static dispatch — no existential `any Workload` in the inner loop. The
 /// registry erases workloads to `any WorkloadMetadata` for enumeration, but
 /// dispatches into specialized `Runner.run(...)` instantiations per case.
+///
+/// **Task context**: `run` is `async` even though the per-sample inner loops
+/// are synchronous. The async entry forces the caller to invoke from a Swift
+/// `Task` tree, which is the necessary precondition for `@TaskLocal` bindings
+/// (e.g., VectorCore's `Operations.$simdProvider`, `ComputeProvider`) to
+/// propagate to the workload's `invoke`. A sync runner would silently
+/// measure default providers instead of whatever the workload configured.
 public struct Runner: Sendable {
     public let clock: BenchClock
     public let timerOverheadNanos: Double
@@ -35,7 +42,9 @@ public struct Runner: Sendable {
     public func run<W: BorrowingWorkload>(
         _ workload: W,
         cancellation: CancellationToken? = nil
-    ) -> CaseResult {
+    ) async -> CaseResult {
+        let caseStartTicks = clock.now()
+        let perCaseBudgetNanos = nanos(from: budget.perCase)
         var flags: Set<CaseFlag> = []
         if workload.identifier.implClass == .approximate {
             flags.insert(.approximate)
@@ -56,9 +65,16 @@ public struct Runner: Sendable {
         var rngForInput = rng0
         let input = workload.makeInput(rng: &rngForInput)
 
-        // 3. Warm-up — 100 ms AND ≥50 iterations (whichever LAST).
-        warmUpBorrowing(workload, input: input)
-        if cancellation?.isCancelled == true {
+        // 3. Warm-up — 100 ms AND ≥50 iterations (whichever LAST). Honors
+        //    cancellation and the per-case wall budget so a long-running
+        //    workload's warm-up alone can't strand the Stop button.
+        warmUpBorrowing(
+            workload, input: input,
+            caseStartTicks: caseStartTicks,
+            budgetNanos: perCaseBudgetNanos,
+            cancellation: cancellation
+        )
+        if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: perCaseBudgetNanos, cancellation: cancellation) {
             flags.insert(.truncated)
             return makeResult(
                 workload: workload, singleShot: nil, amortized: nil,
@@ -76,6 +92,8 @@ public struct Runner: Sendable {
         let singleShot = sampleSingleShotBorrowing(
             workload,
             input: input,
+            caseStartTicks: caseStartTicks,
+            budgetNanos: perCaseBudgetNanos,
             cancellation: cancellation,
             flags: &flags
         )
@@ -93,7 +111,13 @@ public struct Runner: Sendable {
 
         // 5b. Amortized sampling (if enabled).
         let amortized: AmortizedResult? = sampleCount.amortizedSamples > 0
-            ? sampleAmortizedBorrowing(workload, input: input, cancellation: cancellation, flags: &flags)
+            ? sampleAmortizedBorrowing(
+                workload, input: input,
+                caseStartTicks: caseStartTicks,
+                budgetNanos: perCaseBudgetNanos,
+                cancellation: cancellation,
+                flags: &flags
+            )
             : nil
 
         let postRSS = readResidentSize()
@@ -127,6 +151,32 @@ public struct Runner: Sendable {
         )
     }
 
+    /// Convert a Swift `Duration` to nanoseconds. Used to compute per-case
+    /// deadlines from `WallClockBudget.perCase`.
+    internal func nanos(from duration: Duration) -> UInt64 {
+        let components = duration.components
+        return UInt64(max(components.seconds, 0)) &* 1_000_000_000
+            &+ UInt64(max(components.attoseconds, 0) / 1_000_000_000)
+    }
+
+    /// Returns true if the per-case wall budget has been exceeded since
+    /// `caseStartTicks`. Caller decides how to act based on `budget.abortPolicy`.
+    internal func budgetExceeded(caseStartTicks: UInt64, budgetNanos: UInt64) -> Bool {
+        guard budgetNanos > 0 else { return false }
+        return clock.nanos(clock.now() &- caseStartTicks) >= budgetNanos
+    }
+
+    /// Should the sampling loop stop now? True if cancelled OR the per-case
+    /// wall budget is exhausted. Caller flags `.truncated` on the result.
+    internal func shouldStop(
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
+        cancellation: CancellationToken?
+    ) -> Bool {
+        if cancellation?.isCancelled == true { return true }
+        return budgetExceeded(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos)
+    }
+
     /// Derive GB/s and GFLOP/s **only** from the Amortized median. Returns
     /// `(nil, nil)` when no Amortized data exists — single-shot is never a
     /// fallback (per §2.3 / BandwidthEstimator's contract).
@@ -144,21 +194,33 @@ public struct Runner: Sendable {
 
     // MARK: - BorrowingWorkload helpers
 
-    private func warmUpBorrowing<W: BorrowingWorkload>(_ workload: W, input: W.Input) {
+    private func warmUpBorrowing<W: BorrowingWorkload>(
+        _ workload: W, input: W.Input,
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
+        cancellation: CancellationToken?
+    ) {
         let start = clock.now()
-        let budgetTicks: UInt64 = 100_000_000  // ~100 ms in ticks; converted via nanos below
+        let warmupBudgetNanos: UInt64 = 100_000_000   // 100 ms — see §2.4
         var iters = 0
         repeat {
+            // Honor cancellation / budget inside warm-up: a long-running async
+            // workload's warm-up alone shouldn't block Stop. (For sync
+            // workloads, this also caps unbounded warm-up on slow ops.)
+            if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
+                return
+            }
             let result = workload.invoke(input)
             BlackHole.consume(result)
             iters += 1
-        } while iters < 50 || clock.nanos(clock.now() &- start) < UInt64(budgetTicks)
-        _ = iters
+        } while iters < 50 || clock.nanos(clock.now() &- start) < warmupBudgetNanos
     }
 
     private func sampleSingleShotBorrowing<W: BorrowingWorkload>(
         _ workload: W,
         input: W.Input,
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
         cancellation: CancellationToken?,
         flags: inout Set<CaseFlag>
     ) -> LatencyDistribution? {
@@ -166,7 +228,7 @@ public struct Runner: Sendable {
         guard n > 0 else { return nil }
         var samples = [UInt64](repeating: 0, count: n)
         for i in 0..<n {
-            if cancellation?.isCancelled == true {
+            if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
                 flags.insert(.truncated)
                 return LatencyDistribution(samples: Array(samples.prefix(i)))
             }
@@ -182,6 +244,8 @@ public struct Runner: Sendable {
     private func sampleAmortizedBorrowing<W: BorrowingWorkload>(
         _ workload: W,
         input: W.Input,
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
         cancellation: CancellationToken?,
         flags: inout Set<CaseFlag>
     ) -> AmortizedResult? {
@@ -193,7 +257,7 @@ public struct Runner: Sendable {
         let samples = sampleCount.amortizedSamples
         var loopNanos = [UInt64](repeating: 0, count: samples)
         for i in 0..<samples {
-            if cancellation?.isCancelled == true {
+            if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
                 flags.insert(.truncated)
                 return AmortizedResult(
                     iterationsPerBatch: K,
@@ -257,7 +321,9 @@ public struct Runner: Sendable {
     public func run<W: MutatingWorkload>(
         _ workload: W,
         cancellation: CancellationToken? = nil
-    ) -> CaseResult {
+    ) async -> CaseResult {
+        let caseStartTicks = clock.now()
+        let perCaseBudgetNanos = nanos(from: budget.perCase)
         var flags: Set<CaseFlag> = []
         if workload.identifier.implClass == .approximate {
             flags.insert(.approximate)
@@ -273,16 +339,19 @@ public struct Runner: Sendable {
 
         let preRSS = readResidentSize()
 
-        // 2. Build N inputs for single-shot (one per sample) + K inputs for Amortized.
-        var rngForInputs = SplitMix64(seed: baseSeed)
         let singleShotN = sampleCount.singleShotMax
         let amortizedTargetK = autoTuneKMutating(workload, baseSeed: baseSeed)
-        let totalK = Swift.max(singleShotN, amortizedTargetK)
-        var inputs = workload.makeInputs(count: totalK, rng: &rngForInputs)
 
-        // 3. Warm-up (rotates through whatever inputs are available).
-        warmUpMutating(workload, inputs: &inputs)
-        if cancellation?.isCancelled == true {
+        // 3. Warm-up — uses a small ephemeral bank; honors cancellation/budget.
+        var rngForWarmup = SplitMix64(seed: baseSeed &+ 7)
+        var warmupInputs = workload.makeInputs(count: max(amortizedTargetK, 1), rng: &rngForWarmup)
+        warmUpMutating(
+            workload, inputs: &warmupInputs,
+            caseStartTicks: caseStartTicks,
+            budgetNanos: perCaseBudgetNanos,
+            cancellation: cancellation
+        )
+        if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: perCaseBudgetNanos, cancellation: cancellation) {
             flags.insert(.truncated)
             return makeResult(
                 workload: workload, singleShot: nil, amortized: nil,
@@ -296,11 +365,15 @@ public struct Runner: Sendable {
         let thermalStateAtStart = ProcessInfo.processInfo.thermalState
         var thermalEvents: [ThermalEvent] = []
 
-        // 5a. Single-shot: rebuild inputs fresh (warm-up mutated them).
+        // 5a. Single-shot: N fresh inputs (one per sample), each consumed exactly
+        //     once. Per §2.4 step 1 (Mutating, single-shot mode).
         var rngForSingle = SplitMix64(seed: baseSeed &+ 1)
         var singleInputs = workload.makeInputs(count: singleShotN, rng: &rngForSingle)
         let singleShot = sampleSingleShotMutating(
-            workload, inputs: &singleInputs, cancellation: cancellation, flags: &flags
+            workload, inputs: &singleInputs,
+            caseStartTicks: caseStartTicks,
+            budgetNanos: perCaseBudgetNanos,
+            cancellation: cancellation, flags: &flags
         )
 
         let thermalStateAfterSingleShot = ProcessInfo.processInfo.thermalState
@@ -313,10 +386,13 @@ public struct Runner: Sendable {
             flags.insert(.thermalEscalation)
         }
 
-        // 5b. Amortized: rebuild K inputs fresh.
+        // 5b. Amortized: build K inputs ONCE; snapshot originals; restore
+        //     before each sample (M4 fix — never rebuild per sample).
         let amortized: AmortizedResult? = sampleCount.amortizedSamples > 0
             ? sampleAmortizedMutating(
                 workload, K: amortizedTargetK, baseSeed: baseSeed &+ 2,
+                caseStartTicks: caseStartTicks,
+                budgetNanos: perCaseBudgetNanos,
                 cancellation: cancellation, flags: &flags
             )
             : nil
@@ -344,22 +420,32 @@ public struct Runner: Sendable {
         )
     }
 
-    private func warmUpMutating<W: MutatingWorkload>(_ workload: W, inputs: inout [W.Input]) {
+    private func warmUpMutating<W: MutatingWorkload>(
+        _ workload: W, inputs: inout [W.Input],
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
+        cancellation: CancellationToken?
+    ) {
         guard !inputs.isEmpty else { return }
         let start = clock.now()
-        let budgetNanos: UInt64 = 100_000_000
+        let warmupBudgetNanos: UInt64 = 100_000_000
         var iters = 0
         repeat {
+            if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
+                return
+            }
             let idx = iters % inputs.count
             let result = workload.invoke(&inputs[idx])
             BlackHole.consume(result)
             iters += 1
-        } while iters < 50 || clock.nanos(clock.now() &- start) < budgetNanos
+        } while iters < 50 || clock.nanos(clock.now() &- start) < warmupBudgetNanos
     }
 
     private func sampleSingleShotMutating<W: MutatingWorkload>(
         _ workload: W,
         inputs: inout [W.Input],
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
         cancellation: CancellationToken?,
         flags: inout Set<CaseFlag>
     ) -> LatencyDistribution? {
@@ -367,7 +453,7 @@ public struct Runner: Sendable {
         guard n > 0 else { return nil }
         var samples = [UInt64](repeating: 0, count: n)
         for i in 0..<n {
-            if cancellation?.isCancelled == true {
+            if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
                 flags.insert(.truncated)
                 return LatencyDistribution(samples: Array(samples.prefix(i)))
             }
@@ -384,22 +470,35 @@ public struct Runner: Sendable {
         _ workload: W,
         K: Int,
         baseSeed: UInt64,
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
         cancellation: CancellationToken?,
         flags: inout Set<CaseFlag>
     ) -> AmortizedResult? {
+        // M4 fix: build the K-input bank ONCE before the sampling loop.
+        // `originals` is a COW snapshot — assignment `inputs = originals`
+        // before each sample restores the unmutated bytes cheaply (no
+        // allocation in the steady state), and only the elements that were
+        // detached by invoke's `inout` are copied back. K * makeInputs cost
+        // is amortized across all samples instead of paid per sample, which
+        // is the correct spec interpretation of "rotate per iteration".
+        var rng = SplitMix64(seed: baseSeed)
+        let originals = workload.makeInputs(count: K, rng: &rng)
+        var inputs = originals
+
         let samples = sampleCount.amortizedSamples
         var loopNanos = [UInt64](repeating: 0, count: samples)
         for i in 0..<samples {
-            if cancellation?.isCancelled == true {
+            if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
                 flags.insert(.truncated)
                 return AmortizedResult(
                     iterationsPerBatch: K,
                     batchNanos: LatencyDistribution(samples: Array(loopNanos.prefix(i)))
                 )
             }
-            // Fresh K inputs per sample so the loop never re-mutates the same buffer.
-            var rng = SplitMix64(seed: baseSeed &+ UInt64(i))
-            var inputs = workload.makeInputs(count: K, rng: &rng)
+            // Restore K inputs to their original pre-mutation state. Outside
+            // the timed window; cost is O(K) refcount ops on COW arrays.
+            inputs = originals
             let t0 = clock.now()
             for j in 0..<K {
                 let result = workload.invoke(&inputs[j])

@@ -37,6 +37,8 @@ public struct AsyncRunner: Sendable {
         _ workload: W,
         cancellation: CancellationToken? = nil
     ) async -> CaseResult {
+        let caseStartTicks = clock.now()
+        let perCaseBudgetNanos = nanos(from: budget.perCase)
         var flags: Set<CaseFlag> = []
         if workload.identifier.implClass == .approximate {
             flags.insert(.approximate)
@@ -57,9 +59,14 @@ public struct AsyncRunner: Sendable {
         var rngForInput = SplitMix64(seed: baseSeed)
         var input = await workload.makeInput(rng: &rngForInput)
 
-        // 3. Warm-up.
-        await warmUp(workload, input: &input)
-        if cancellation?.isCancelled == true {
+        // 3. Warm-up (honors cancellation + budget).
+        await warmUp(
+            workload, input: &input,
+            caseStartTicks: caseStartTicks,
+            budgetNanos: perCaseBudgetNanos,
+            cancellation: cancellation
+        )
+        if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: perCaseBudgetNanos, cancellation: cancellation) {
             flags.insert(.truncated)
             return makeEmptyResult(workload: workload, preRSS: preRSS, verification: verification, flags: flags)
         }
@@ -70,7 +77,10 @@ public struct AsyncRunner: Sendable {
 
         // 5a. Single-shot.
         let singleShot = await sampleSingleShot(
-            workload, input: &input, cancellation: cancellation, flags: &flags
+            workload, input: &input,
+            caseStartTicks: caseStartTicks,
+            budgetNanos: perCaseBudgetNanos,
+            cancellation: cancellation, flags: &flags
         )
 
         let thermalStateAfterSingleShot = ProcessInfo.processInfo.thermalState
@@ -86,7 +96,12 @@ public struct AsyncRunner: Sendable {
         // 5b. Amortized (if enabled). For async ops, K tuning is more
         // conservative — each invocation may already have non-trivial cost.
         let amortized: AmortizedResult? = sampleCount.amortizedSamples > 0
-            ? await sampleAmortized(workload, input: &input, cancellation: cancellation, flags: &flags)
+            ? await sampleAmortized(
+                workload, input: &input,
+                caseStartTicks: caseStartTicks,
+                budgetNanos: perCaseBudgetNanos,
+                cancellation: cancellation, flags: &flags
+            )
             : nil
 
         let postRSS = readResidentSize()
@@ -112,11 +127,19 @@ public struct AsyncRunner: Sendable {
         )
     }
 
-    private func warmUp<W: AsyncWorkload>(_ workload: W, input: inout W.Input) async {
+    private func warmUp<W: AsyncWorkload>(
+        _ workload: W, input: inout W.Input,
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
+        cancellation: CancellationToken?
+    ) async {
         let start = clock.now()
-        let budgetNanos: UInt64 = 100_000_000
+        let warmupBudgetNanos: UInt64 = 100_000_000
         var iters = 0
         repeat {
+            if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
+                return
+            }
             do {
                 let result = try await workload.invoke(&input)
                 BlackHole.consume(result)
@@ -124,12 +147,14 @@ public struct AsyncRunner: Sendable {
                 BlackHole.consume(error)
             }
             iters += 1
-        } while iters < 50 || clock.nanos(clock.now() &- start) < budgetNanos
+        } while iters < 50 || clock.nanos(clock.now() &- start) < warmupBudgetNanos
     }
 
     private func sampleSingleShot<W: AsyncWorkload>(
         _ workload: W,
         input: inout W.Input,
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
         cancellation: CancellationToken?,
         flags: inout Set<CaseFlag>
     ) async -> LatencyDistribution? {
@@ -137,7 +162,7 @@ public struct AsyncRunner: Sendable {
         guard n > 0 else { return nil }
         var samples = [UInt64](repeating: 0, count: n)
         for i in 0..<n {
-            if cancellation?.isCancelled == true {
+            if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
                 flags.insert(.truncated)
                 return LatencyDistribution(samples: Array(samples.prefix(i)))
             }
@@ -149,7 +174,7 @@ public struct AsyncRunner: Sendable {
                 samples[i] = clock.nanos(t1 &- t0)
             } catch {
                 BlackHole.consume(error)
-                samples[i] = 0  // treated as a sample of 0; flagged separately
+                samples[i] = 0  // treated as 0; flagged in CaseResult via .approximate / future error-count
             }
         }
         return LatencyDistribution(samples: samples)
@@ -158,28 +183,39 @@ public struct AsyncRunner: Sendable {
     private func sampleAmortized<W: AsyncWorkload>(
         _ workload: W,
         input: inout W.Input,
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
         cancellation: CancellationToken?,
         flags: inout Set<CaseFlag>
     ) async -> AmortizedResult? {
-        // Async amortization probes K with single-iteration runs to estimate
-        // per-op cost (async ops are typically >µs, so probe overhead is small).
-        let probeT0 = clock.now()
-        do {
-            let probeResult = try await workload.invoke(&input)
-            BlackHole.consume(probeResult)
-        } catch {
-            BlackHole.consume(error)
-        }
-        let probeNanos = clock.nanos(clock.now() &- probeT0)
+        // M7 fix: iterative probe-and-double to auto-tune K, mirroring the
+        // sync Runner. Hard cap at 1_000_000 to prevent runaway when probe
+        // returns 1ns by quantization.
         let targetLoopNanos: UInt64 = 100_000
-        let K = probeNanos == 0
-            ? 16
-            : Swift.max(1, Int(Double(targetLoopNanos) / Double(probeNanos)).advanced(by: 0))
+        let maxK = 1_000_000
+        var probeK = 4
+        for _ in 0..<8 {
+            let t0 = clock.now()
+            for _ in 0..<probeK {
+                do {
+                    let result = try await workload.invoke(&input)
+                    BlackHole.consume(result)
+                } catch {
+                    BlackHole.consume(error)
+                }
+            }
+            let elapsed = clock.nanos(clock.now() &- t0)
+            if elapsed >= targetLoopNanos { break }
+            let scale = elapsed == 0 ? 4 : Int((Double(targetLoopNanos) / Double(elapsed) * 1.25).rounded(.up))
+            probeK = Swift.min(probeK * Swift.max(scale, 2), maxK)
+            if probeK == maxK { break }
+        }
+        let K = probeK
 
         let samples = sampleCount.amortizedSamples
         var loopNanos = [UInt64](repeating: 0, count: samples)
         for i in 0..<samples {
-            if cancellation?.isCancelled == true {
+            if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
                 flags.insert(.truncated)
                 return AmortizedResult(
                     iterationsPerBatch: K,
@@ -224,6 +260,28 @@ public struct AsyncRunner: Sendable {
     }
 
     // MARK: - Helpers
+
+    /// Same as `Runner.nanos(from:)` — duplicated to keep AsyncRunner
+    /// self-contained pending a shared RunnerCommon helper.
+    internal func nanos(from duration: Duration) -> UInt64 {
+        let components = duration.components
+        return UInt64(max(components.seconds, 0)) &* 1_000_000_000
+            &+ UInt64(max(components.attoseconds, 0) / 1_000_000_000)
+    }
+
+    internal func budgetExceeded(caseStartTicks: UInt64, budgetNanos: UInt64) -> Bool {
+        guard budgetNanos > 0 else { return false }
+        return clock.nanos(clock.now() &- caseStartTicks) >= budgetNanos
+    }
+
+    internal func shouldStop(
+        caseStartTicks: UInt64,
+        budgetNanos: UInt64,
+        cancellation: CancellationToken?
+    ) -> Bool {
+        if cancellation?.isCancelled == true { return true }
+        return budgetExceeded(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos)
+    }
 
     /// Same contract as Runner.deriveThroughput: only the Amortized median
     /// yields bandwidth/gflops; single-shot is never a fallback.

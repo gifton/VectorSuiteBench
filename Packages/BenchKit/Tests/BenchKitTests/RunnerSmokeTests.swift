@@ -5,14 +5,14 @@ import Foundation
 @Suite("Runner smoke test")
 struct RunnerSmokeTests {
     @Test("Runner produces a verified result for a naive dot")
-    func endToEnd() throws {
+    func endToEnd() async throws {
         let workload = DotSmokeWorkload(n: 512)
         let runner = Runner(
             runID: "smoke-test",
             budget: .smoke,
             sampleCount: SampleCount(singleShotMax: 64, amortizedSamples: 16)
         )
-        let result = runner.run(workload)
+        let result = await runner.run(workload)
         #expect(result.verification.isVerified, "verification failed: \(result.verification)")
 
         let singleShot = try #require(result.singleShot)
@@ -29,7 +29,7 @@ struct RunnerSmokeTests {
     }
 
     @Test("Cancellation truncates the in-flight case")
-    func cancellation() throws {
+    func cancellation() async throws {
         let workload = DotSmokeWorkload(n: 64)
         let token = CancellationToken()
         token.cancel()
@@ -38,7 +38,7 @@ struct RunnerSmokeTests {
             budget: .smoke,
             sampleCount: SampleCount(singleShotMax: 1000, amortizedSamples: 100)
         )
-        let result = runner.run(workload, cancellation: token)
+        let result = await runner.run(workload, cancellation: token)
         #expect(result.flags.contains(.truncated))
     }
 }

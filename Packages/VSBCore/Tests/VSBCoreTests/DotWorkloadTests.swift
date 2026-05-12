@@ -6,32 +6,32 @@ import Foundation
 @Suite("VSBCore Dot workloads")
 struct DotWorkloadTests {
     @Test("Naive dot verifies and produces samples")
-    func naive() throws {
-        let result = run(VSBCoreRegistry.naiveDot512)
+    func naive() async throws {
+        let result = await run(VSBCoreRegistry.naiveDot512)
         try assertVerified(result, label: "naive")
     }
 
     @Test("Accelerate dot verifies and produces samples")
-    func accelerate() throws {
-        let result = run(VSBCoreRegistry.accelerateDot512)
+    func accelerate() async throws {
+        let result = await run(VSBCoreRegistry.accelerateDot512)
         try assertVerified(result, label: "accelerate")
     }
 
     @Test("Apple simd dot verifies and produces samples")
-    func appleSimd() throws {
-        let result = run(VSBCoreRegistry.simdDot512)
+    func appleSimd() async throws {
+        let result = await run(VSBCoreRegistry.simdDot512)
         try assertVerified(result, label: "simd")
     }
 
     @Test("VectorCore optimized dot (raw, +a·b) verifies")
-    func vectorCoreOptimized() throws {
-        let result = run(VSBCoreRegistry.vectorCoreOptimizedDot512)
+    func vectorCoreOptimized() async throws {
+        let result = await run(VSBCoreRegistry.vectorCoreOptimizedDot512)
         try assertVerified(result, label: "vectorCore-optimized")
     }
 
     @Test("VectorCore metric dot (-a·b) verifies with negation-aware oracle")
-    func vectorCoreMetric() throws {
-        let result = run(VSBCoreRegistry.vectorCoreMetricDot512)
+    func vectorCoreMetric() async throws {
+        let result = await run(VSBCoreRegistry.vectorCoreMetricDot512)
         try assertVerified(result, label: "vectorCore-metric")
     }
 
@@ -62,13 +62,13 @@ struct DotWorkloadTests {
 
     // MARK: - Helpers
 
-    private func run<W: BorrowingWorkload>(_ workload: W) -> CaseResult {
+    private func run<W: BorrowingWorkload>(_ workload: W) async -> CaseResult {
         let runner = Runner(
             runID: "vsbcore-dot-test",
             budget: .smoke,
             sampleCount: SampleCount(singleShotMax: 32, amortizedSamples: 8)
         )
-        return runner.run(workload)
+        return await runner.run(workload)
     }
 
     private func assertVerified(_ result: CaseResult, label: String) throws {

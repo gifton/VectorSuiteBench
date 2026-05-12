@@ -5,14 +5,14 @@ import Foundation
 @Suite("NullWorkload self-bench")
 struct NullWorkloadTests {
     @Test("Runs and produces a measurable floor")
-    func floor() throws {
+    func floor() async throws {
         let workload = NullWorkload()
         let runner = Runner(
             runID: "null-self-bench",
             budget: .smoke,
             sampleCount: SampleCount(singleShotMax: 100, amortizedSamples: 32)
         )
-        let result = runner.run(workload)
+        let result = await runner.run(workload)
 
         // Self-bench is unverifiable by design.
         if case .unverifiable = result.verification {

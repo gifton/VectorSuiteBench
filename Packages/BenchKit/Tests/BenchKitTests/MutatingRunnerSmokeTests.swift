@@ -5,14 +5,14 @@ import Foundation
 @Suite("Mutating runner smoke")
 struct MutatingRunnerSmokeTests {
     @Test("Mutating workload runs end-to-end with K-input rotation")
-    func mutatingEndToEnd() throws {
+    func mutatingEndToEnd() async throws {
         let workload = NormalizeInPlaceSmokeWorkload(n: 256)
         let runner = Runner(
             runID: "mutating-smoke",
             budget: .smoke,
             sampleCount: SampleCount(singleShotMax: 32, amortizedSamples: 8)
         )
-        let result = runner.run(workload)
+        let result = await runner.run(workload)
 
         #expect(result.verification.isVerified, "verification failed: \(result.verification)")
         let singleShot = try #require(result.singleShot)
