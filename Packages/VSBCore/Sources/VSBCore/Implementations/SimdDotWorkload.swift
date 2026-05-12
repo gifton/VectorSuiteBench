@@ -2,11 +2,14 @@ import Foundation
 import simd
 import BenchKit
 
-/// Apple `simd` framework Dot via `simd_dot` on SIMD8<Float> chunks. The
-/// language-level SIMD path — distinct from VectorCore (which builds on top
-/// of similar primitives but adds buffer management + dispatch).
+/// Apple `simd` framework Dot baseline. Walks the input buffers in
+/// `simd_float4` chunks via `UnsafeRawPointer.load(fromByteOffset:as:)` (a
+/// single 16-byte load per chunk, not eight scalar loads constructing the
+/// vector), accumulates via the framework's `simd_muladd`, and finishes
+/// with a horizontal `reduce_add`.
 ///
-/// For N not divisible by 8, the remainder is summed scalar.
+/// For N not divisible by 4, the remainder is summed scalar via raw
+/// pointers (skipping Swift's bounds-checked subscript).
 public struct SimdDotWorkload: BorrowingWorkload {
     public typealias Input = RawFloatDotInput
     public typealias Output = Float
@@ -41,32 +44,29 @@ public struct SimdDotWorkload: BorrowingWorkload {
 
     public func invoke(_ input: borrowing Input) -> Output {
         let count = input.a.count
-        var acc = SIMD8<Float>(repeating: 0)
-        let chunks = count / 8
+        let chunks = count / 4
+        var acc = simd_float4(repeating: 0)
+        var tailSum: Float = 0
         input.a.withUnsafeBufferPointer { aPtr in
             input.b.withUnsafeBufferPointer { bPtr in
-                let a = aPtr.baseAddress!
-                let b = bPtr.baseAddress!
+                let aRaw = UnsafeRawPointer(aPtr.baseAddress!)
+                let bRaw = UnsafeRawPointer(bPtr.baseAddress!)
+                // Each iteration: one 16B aligned load per buffer, one FMA.
                 for i in 0..<chunks {
-                    let av = SIMD8<Float>(
-                        a[i * 8 + 0], a[i * 8 + 1], a[i * 8 + 2], a[i * 8 + 3],
-                        a[i * 8 + 4], a[i * 8 + 5], a[i * 8 + 6], a[i * 8 + 7]
-                    )
-                    let bv = SIMD8<Float>(
-                        b[i * 8 + 0], b[i * 8 + 1], b[i * 8 + 2], b[i * 8 + 3],
-                        b[i * 8 + 4], b[i * 8 + 5], b[i * 8 + 6], b[i * 8 + 7]
-                    )
-                    acc += av * bv
+                    let offset = i &* MemoryLayout<simd_float4>.stride
+                    let av = aRaw.load(fromByteOffset: offset, as: simd_float4.self)
+                    let bv = bRaw.load(fromByteOffset: offset, as: simd_float4.self)
+                    acc = simd_muladd(av, bv, acc)
+                }
+                // Tail (0..3 elements) via raw pointers — no bounds-check overhead.
+                let tailStart = chunks &* 4
+                let aTyped = aPtr.baseAddress!
+                let bTyped = bPtr.baseAddress!
+                for i in tailStart..<count {
+                    tailSum += aTyped[i] * bTyped[i]
                 }
             }
         }
-        var sum = acc.sum()
-        let tail = chunks * 8
-        if tail < count {
-            for i in tail..<count {
-                sum += input.a[i] * input.b[i]
-            }
-        }
-        return sum
+        return simd_reduce_add(acc) + tailSum
     }
 }

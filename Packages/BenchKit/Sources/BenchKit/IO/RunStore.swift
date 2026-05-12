@@ -13,9 +13,19 @@ import Foundation
 /// └── peaks/<hardwareFingerprint>.json
 /// ```
 ///
-/// **Atomicity**: every write goes to `<path>.tmp` → `fsync` → `rename(2)`.
-/// APFS-atomic on macOS. Readers never see half-written files; a crash
-/// mid-run leaves a valid partial run, not a corrupt JSON.
+/// **Atomicity** (implementation note): every write uses
+/// `Data.write(to:, options: .atomic)` followed by `replaceItemAt` when the
+/// destination already exists. Foundation's `.atomic` is itself temp+rename
+/// on Darwin and `fsync`s the file before renaming. The directory itself is
+/// NOT separately `fsync`'d after rename — so a power-loss event between
+/// rename and directory commit could in principle lose the new file.
+///
+/// For benchmark data this is acceptable: the user just re-runs. The spec's
+/// "APFS-atomic" claim is slightly stronger than what we deliver; if a
+/// future scenario demands true filesystem-durability we'd drop down to
+/// raw `open(O_WRONLY|O_CREAT)` + `write` + `fsync(fd)` + `rename` +
+/// `fsync(dirfd)`. Until then, readers still never see half-written files;
+/// a crash mid-run leaves a valid partial run.
 public final class RunStore: Sendable {
     public let rootURL: URL
 

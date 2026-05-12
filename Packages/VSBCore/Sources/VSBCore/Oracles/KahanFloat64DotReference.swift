@@ -38,8 +38,14 @@ public func floatULPDistance(_ a: Float, _ b: Float) -> UInt32 {
 ///    (rounded to Float).
 ///
 /// Workloads supply `extractInput` to project their concrete `Input` type
-/// down to `(a: [Float], b: [Float])` for the oracle. Mismatched types
-/// produce `.failed`.
+/// down to `(a: [Float], b: [Float])` for the oracle.
+///
+/// **Type-mismatch failure mode is distinct.** If a candidate or reference
+/// can't be unwrapped to the expected concrete type, the oracle returns
+/// `.unverifiable("oracle type mismatch: ...")` rather than `.failed` —
+/// which would be indistinguishable from a real numeric divergence by ~4
+/// billion ULPs. (Full type-safety via a generic ReferenceOracle<Input,
+/// Output> is the rigorous fix; see Phase-2 deferred work.)
 public func makeDotOracle<Input>(
     extractInput: @Sendable @escaping (Input) -> (a: [Float], b: [Float])?,
     expectedSignTransform: @Sendable @escaping (Double) -> Double = { $0 }
@@ -48,15 +54,24 @@ public func makeDotOracle<Input>(
         compute: { input in
             guard let typed = input as? Input,
                   let unwrapped = extractInput(typed) else {
+                // Sentinel: a quiet NaN here is detected by the compare side
+                // as a type mismatch (reference value is NaN AND we have no
+                // candidate-side signal yet). Compare-side returns
+                // .unverifiable rather than .failed.
                 return .scalar(.nan)
             }
             let raw = kahanFloat64Dot(unwrapped.a, unwrapped.b)
             return .scalar(expectedSignTransform(raw))
         },
         compare: { candidate, reference, window in
-            guard let candidateF = candidate as? Float,
-                  case .scalar(let refD) = reference else {
-                return .failed(maxUlpObserved: .max, window: window, sampleIndex: 0)
+            guard let candidateF = candidate as? Float else {
+                return .unverifiable(reason: "oracle type mismatch: candidate is not Float")
+            }
+            guard case .scalar(let refD) = reference else {
+                return .unverifiable(reason: "oracle type mismatch: reference is not .scalar")
+            }
+            if refD.isNaN {
+                return .unverifiable(reason: "oracle type mismatch: reference returned NaN (extractInput probably failed)")
             }
             let refF = Float(refD)
             let diff = floatULPDistance(candidateF, refF)
