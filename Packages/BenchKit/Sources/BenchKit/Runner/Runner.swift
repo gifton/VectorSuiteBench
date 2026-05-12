@@ -1,0 +1,303 @@
+import Foundation
+import Darwin.Mach
+
+/// Synchronous runner for `BorrowingWorkload` / `MutatingWorkload`. The async
+/// counterpart for `AsyncWorkload` lives in `AsyncRunner.swift`.
+///
+/// The runner is generic over the concrete workload type so the hot path uses
+/// static dispatch — no existential `any Workload` in the inner loop. The
+/// registry erases workloads to `any WorkloadMetadata` for enumeration, but
+/// dispatches into specialized `Runner.run(...)` instantiations per case.
+public struct Runner: Sendable {
+    public let clock: BenchClock
+    public let timerOverheadNanos: Double
+    public let runID: String
+    public let budget: WallClockBudget
+    public let sampleCount: SampleCount
+
+    public init(
+        runID: String,
+        budget: WallClockBudget,
+        sampleCount: SampleCount,
+        timerOverheadNanos: Double? = nil
+    ) {
+        let clock = BenchClock()
+        self.clock = clock
+        self.timerOverheadNanos = timerOverheadNanos
+            ?? TimerCalibration.measureOverheadNanos(clock: clock)
+        self.runID = runID
+        self.budget = budget
+        self.sampleCount = sampleCount
+    }
+
+    // MARK: - BorrowingWorkload
+
+    public func run<W: BorrowingWorkload>(
+        _ workload: W,
+        cancellation: CancellationToken? = nil
+    ) -> CaseResult {
+        var flags: Set<CaseFlag> = []
+        if workload.identifier.implClass == .approximate {
+            flags.insert(.approximate)
+        }
+
+        // 1. Verification (synchronous reference call before warm-up).
+        let rng0 = SplitMix64(seed: SeedTable.seed(for: workload.identifier))
+        var rngForVerify = rng0
+        let verification = verifyBorrowing(workload, rng: &rngForVerify)
+        if case .failed = verification {
+            return failedResult(workload: workload, verification: verification, flags: flags)
+        }
+
+        // Pre-sample RSS snapshot.
+        let preRSS = readResidentSize()
+
+        // 2. Build the one input used for warm-up + both sampling modes.
+        var rngForInput = rng0
+        let input = workload.makeInput(rng: &rngForInput)
+
+        // 3. Warm-up — 100 ms AND ≥50 iterations (whichever LAST).
+        warmUpBorrowing(workload, input: input)
+        if cancellation?.isCancelled == true {
+            flags.insert(.truncated)
+            return makeResult(
+                workload: workload, singleShot: nil, amortized: nil,
+                preRSS: preRSS, postRSS: readResidentSize(),
+                memoryTrace: [], thermalEvents: [],
+                verification: verification, flags: flags
+            )
+        }
+
+        // 4. Thermal gate.
+        let thermalStateAtStart = ProcessInfo.processInfo.thermalState
+        var thermalEvents: [ThermalEvent] = []
+
+        // 5a. Single-shot sampling.
+        let singleShot = sampleSingleShotBorrowing(
+            workload,
+            input: input,
+            cancellation: cancellation,
+            flags: &flags
+        )
+
+        // Check thermal state mid-run.
+        let thermalStateAfterSingleShot = ProcessInfo.processInfo.thermalState
+        if thermalStateAfterSingleShot != thermalStateAtStart {
+            thermalEvents.append(ThermalEvent(
+                timestampNanos: 0,
+                from: String(describing: thermalStateAtStart),
+                to: String(describing: thermalStateAfterSingleShot)
+            ))
+            flags.insert(.thermalEscalation)
+        }
+
+        // 5b. Amortized sampling (if enabled).
+        let amortized: AmortizedResult? = sampleCount.amortizedSamples > 0
+            ? sampleAmortizedBorrowing(workload, input: input, cancellation: cancellation, flags: &flags)
+            : nil
+
+        let postRSS = readResidentSize()
+
+        let nanosPerOp = amortized?.nanosPerOp ?? Double(singleShot?.p50 ?? 0)
+        let bandwidth = BandwidthEstimator.gbPerSec(bytesMoved: workload.bytesMoved, nanosPerOp: nanosPerOp)
+        let gflops = BandwidthEstimator.gflops(flops: workload.flops, nanosPerOp: nanosPerOp)
+
+        if singleShot?.looksBimodal == true {
+            flags.insert(.bimodal)
+        }
+        // Memory growth heuristic: post-RSS > pre-RSS by more than 10 MB.
+        if postRSS > preRSS + 10 * 1024 * 1024 {
+            flags.insert(.memoryGrowth)
+        }
+
+        return CaseResult(
+            id: workload.identifier,
+            singleShot: singleShot,
+            amortized: amortized,
+            bandwidthGBPerSec: bandwidth,
+            gflops: gflops,
+            preSampleRSS: preRSS,
+            postSampleRSS: postRSS,
+            memoryTrace: [],  // Continuous trace not yet implemented; snapshot-only for now.
+            thermalEvents: thermalEvents,
+            timerOverheadNanos: timerOverheadNanos,
+            verification: verification,
+            flags: flags,
+            runID: runID
+        )
+    }
+
+    // MARK: - BorrowingWorkload helpers
+
+    private func warmUpBorrowing<W: BorrowingWorkload>(_ workload: W, input: W.Input) {
+        let start = clock.now()
+        let budgetTicks: UInt64 = 100_000_000  // ~100 ms in ticks; converted via nanos below
+        var iters = 0
+        repeat {
+            let result = workload.invoke(input)
+            BlackHole.consume(result)
+            iters += 1
+        } while iters < 50 || clock.nanos(clock.now() &- start) < UInt64(budgetTicks)
+        _ = iters
+    }
+
+    private func sampleSingleShotBorrowing<W: BorrowingWorkload>(
+        _ workload: W,
+        input: W.Input,
+        cancellation: CancellationToken?,
+        flags: inout Set<CaseFlag>
+    ) -> LatencyDistribution? {
+        let n = sampleCount.singleShotMax
+        guard n > 0 else { return nil }
+        var samples = [UInt64](repeating: 0, count: n)
+        for i in 0..<n {
+            if cancellation?.isCancelled == true {
+                flags.insert(.truncated)
+                return LatencyDistribution(samples: Array(samples.prefix(i)))
+            }
+            let t0 = clock.now()
+            let result = workload.invoke(input)
+            let t1 = clock.now()
+            BlackHole.consume(result)
+            samples[i] = clock.nanos(t1 &- t0)
+        }
+        return LatencyDistribution(samples: samples)
+    }
+
+    private func sampleAmortizedBorrowing<W: BorrowingWorkload>(
+        _ workload: W,
+        input: W.Input,
+        cancellation: CancellationToken?,
+        flags: inout Set<CaseFlag>
+    ) -> AmortizedResult? {
+        // Auto-tune K so each loop takes ≥100 µs.
+        let targetLoopNanos: UInt64 = 100_000
+        var K = autoTuneK(workload, input: input, targetLoopNanos: targetLoopNanos)
+        K = Swift.max(K, 1)
+
+        let samples = sampleCount.amortizedSamples
+        var loopNanos = [UInt64](repeating: 0, count: samples)
+        for i in 0..<samples {
+            if cancellation?.isCancelled == true {
+                flags.insert(.truncated)
+                return AmortizedResult(
+                    iterationsPerBatch: K,
+                    batchNanos: LatencyDistribution(samples: Array(loopNanos.prefix(i)))
+                )
+            }
+            let t0 = clock.now()
+            for _ in 0..<K {
+                let result = workload.invoke(input)
+                BlackHole.consume(result)
+            }
+            let t1 = clock.now()
+            loopNanos[i] = clock.nanos(t1 &- t0)
+        }
+        return AmortizedResult(
+            iterationsPerBatch: K,
+            batchNanos: LatencyDistribution(samples: loopNanos)
+        )
+    }
+
+    private func autoTuneK<W: BorrowingWorkload>(
+        _ workload: W, input: W.Input, targetLoopNanos: UInt64
+    ) -> Int {
+        // Probe: time a small K to estimate per-op cost, then scale up.
+        var probeK = 4
+        for _ in 0..<8 {
+            let t0 = clock.now()
+            for _ in 0..<probeK {
+                let result = workload.invoke(input)
+                BlackHole.consume(result)
+            }
+            let t1 = clock.now()
+            let elapsed = clock.nanos(t1 &- t0)
+            if elapsed >= targetLoopNanos {
+                return probeK
+            }
+            // Scale up by (target / elapsed) with a safety factor of 1.25.
+            let scale = elapsed == 0 ? 4 : Int((Double(targetLoopNanos) / Double(elapsed) * 1.25).rounded(.up))
+            probeK = Swift.min(probeK * Swift.max(scale, 2), 1_000_000)
+        }
+        return probeK
+    }
+
+    private func verifyBorrowing<W: BorrowingWorkload>(_ workload: W, rng: inout SplitMix64) -> VerificationResult {
+        guard let oracle = workload.referenceOracle else {
+            return .unverifiable(reason: "no reference oracle declared")
+        }
+        let verifyInput = workload.makeInput(rng: &rng)
+        let candidate = workload.invoke(verifyInput)
+        let reference = oracle.compute(verifyInput)
+        let window = ulpTolerance(
+            op: workload.identifier.op,
+            implClass: workload.identifier.implClass,
+            shape: workload.identifier.shape
+        )
+        return oracle.compare(candidate, reference, window)
+    }
+
+    // MARK: - Result helpers
+
+    private func failedResult<W: WorkloadMetadata>(
+        workload: W,
+        verification: VerificationResult,
+        flags: Set<CaseFlag>
+    ) -> CaseResult {
+        CaseResult(
+            id: workload.identifier,
+            singleShot: nil,
+            amortized: nil,
+            bandwidthGBPerSec: 0,
+            gflops: 0,
+            preSampleRSS: 0,
+            postSampleRSS: 0,
+            memoryTrace: [],
+            thermalEvents: [],
+            timerOverheadNanos: timerOverheadNanos,
+            verification: verification,
+            flags: flags,
+            runID: runID
+        )
+    }
+
+    private func makeResult<W: WorkloadMetadata>(
+        workload: W,
+        singleShot: LatencyDistribution?,
+        amortized: AmortizedResult?,
+        preRSS: UInt64,
+        postRSS: UInt64,
+        memoryTrace: [MemorySample],
+        thermalEvents: [ThermalEvent],
+        verification: VerificationResult,
+        flags: Set<CaseFlag>
+    ) -> CaseResult {
+        let nanosPerOp = amortized?.nanosPerOp ?? Double(singleShot?.p50 ?? 0)
+        return CaseResult(
+            id: workload.identifier,
+            singleShot: singleShot,
+            amortized: amortized,
+            bandwidthGBPerSec: BandwidthEstimator.gbPerSec(bytesMoved: workload.bytesMoved, nanosPerOp: nanosPerOp),
+            gflops: BandwidthEstimator.gflops(flops: workload.flops, nanosPerOp: nanosPerOp),
+            preSampleRSS: preRSS,
+            postSampleRSS: postRSS,
+            memoryTrace: memoryTrace,
+            thermalEvents: thermalEvents,
+            timerOverheadNanos: timerOverheadNanos,
+            verification: verification,
+            flags: flags,
+            runID: runID
+        )
+    }
+
+    private func readResidentSize() -> UInt64 {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) { infoPtr -> kern_return_t in
+            infoPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { reboundPtr in
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), reboundPtr, &count)
+            }
+        }
+        return kr == KERN_SUCCESS ? UInt64(info.resident_size) : 0
+    }
+}
