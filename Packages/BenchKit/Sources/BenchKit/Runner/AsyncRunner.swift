@@ -17,12 +17,14 @@ public struct AsyncRunner: Sendable {
     public let runID: String
     public let budget: WallClockBudget
     public let sampleCount: SampleCount
+    public let memoryProbe: MemoryProbe?
 
     public init(
         runID: String,
         budget: WallClockBudget,
         sampleCount: SampleCount,
-        timerOverheadNanos: Double? = nil
+        timerOverheadNanos: Double? = nil,
+        memoryProbe: MemoryProbe? = MemoryProbe()
     ) {
         let clock = BenchClock()
         self.clock = clock
@@ -31,6 +33,7 @@ public struct AsyncRunner: Sendable {
         self.runID = runID
         self.budget = budget
         self.sampleCount = sampleCount
+        self.memoryProbe = memoryProbe
     }
 
     public func run<W: AsyncWorkload>(
@@ -95,12 +98,14 @@ public struct AsyncRunner: Sendable {
 
         // 5b. Amortized (if enabled). For async ops, K tuning is more
         // conservative — each invocation may already have non-trivial cost.
+        var memoryTrace: [MemorySample] = []
         let amortized: AmortizedResult? = sampleCount.amortizedSamples > 0
             ? await sampleAmortized(
                 workload, input: &input,
                 caseStartTicks: caseStartTicks,
                 budgetNanos: perCaseBudgetNanos,
-                cancellation: cancellation, flags: &flags
+                cancellation: cancellation, flags: &flags,
+                memoryTrace: &memoryTrace
             )
             : nil
 
@@ -118,7 +123,7 @@ public struct AsyncRunner: Sendable {
             gflops: gflops,
             preSampleRSS: preRSS,
             postSampleRSS: postRSS,
-            memoryTrace: [],
+            memoryTrace: memoryTrace,
             thermalEvents: thermalEvents,
             timerOverheadNanos: timerOverheadNanos,
             verification: verification,
@@ -186,7 +191,8 @@ public struct AsyncRunner: Sendable {
         caseStartTicks: UInt64,
         budgetNanos: UInt64,
         cancellation: CancellationToken?,
-        flags: inout Set<CaseFlag>
+        flags: inout Set<CaseFlag>,
+        memoryTrace: inout [MemorySample]
     ) async -> AmortizedResult? {
         // M7 fix: iterative probe-and-double to auto-tune K, mirroring the
         // sync Runner. Hard cap at 1_000_000 to prevent runaway when probe
@@ -214,9 +220,14 @@ public struct AsyncRunner: Sendable {
 
         let samples = sampleCount.amortizedSamples
         var loopNanos = [UInt64](repeating: 0, count: samples)
+        let probeHandle = memoryProbe?.start(referenceTicks: clock.now(), clock: clock)
+
         for i in 0..<samples {
             if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
                 flags.insert(.truncated)
+                if let h = probeHandle, let probe = memoryProbe {
+                    memoryTrace = probe.stop(h)
+                }
                 return AmortizedResult(
                     iterationsPerBatch: K,
                     batchNanos: LatencyDistribution(samples: Array(loopNanos.prefix(i)))
@@ -233,6 +244,10 @@ public struct AsyncRunner: Sendable {
             }
             let t1 = clock.now()
             loopNanos[i] = clock.nanos(t1 &- t0)
+        }
+
+        if let h = probeHandle, let probe = memoryProbe {
+            memoryTrace = probe.stop(h)
         }
         return AmortizedResult(
             iterationsPerBatch: K,

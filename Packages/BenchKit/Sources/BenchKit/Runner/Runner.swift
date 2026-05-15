@@ -21,12 +21,14 @@ public struct Runner: Sendable {
     public let runID: String
     public let budget: WallClockBudget
     public let sampleCount: SampleCount
+    public let memoryProbe: MemoryProbe?
 
     public init(
         runID: String,
         budget: WallClockBudget,
         sampleCount: SampleCount,
-        timerOverheadNanos: Double? = nil
+        timerOverheadNanos: Double? = nil,
+        memoryProbe: MemoryProbe? = MemoryProbe()
     ) {
         let clock = BenchClock()
         self.clock = clock
@@ -35,6 +37,7 @@ public struct Runner: Sendable {
         self.runID = runID
         self.budget = budget
         self.sampleCount = sampleCount
+        self.memoryProbe = memoryProbe
     }
 
     // MARK: - BorrowingWorkload
@@ -109,14 +112,18 @@ public struct Runner: Sendable {
             flags.insert(.thermalEscalation)
         }
 
-        // 5b. Amortized sampling (if enabled).
+        // 5b. Amortized sampling (if enabled). Memory probe runs only here —
+        //     single-shot's sub-µs samples cannot tolerate the OS jitter from
+        //     a 100 Hz background reader (see Probes/MemoryProbe.swift).
+        var memoryTrace: [MemorySample] = []
         let amortized: AmortizedResult? = sampleCount.amortizedSamples > 0
             ? sampleAmortizedBorrowing(
                 workload, input: input,
                 caseStartTicks: caseStartTicks,
                 budgetNanos: perCaseBudgetNanos,
                 cancellation: cancellation,
-                flags: &flags
+                flags: &flags,
+                memoryTrace: &memoryTrace
             )
             : nil
 
@@ -142,7 +149,7 @@ public struct Runner: Sendable {
             gflops: gflops,
             preSampleRSS: preRSS,
             postSampleRSS: postRSS,
-            memoryTrace: [],
+            memoryTrace: memoryTrace,
             thermalEvents: thermalEvents,
             timerOverheadNanos: timerOverheadNanos,
             verification: verification,
@@ -247,7 +254,8 @@ public struct Runner: Sendable {
         caseStartTicks: UInt64,
         budgetNanos: UInt64,
         cancellation: CancellationToken?,
-        flags: inout Set<CaseFlag>
+        flags: inout Set<CaseFlag>,
+        memoryTrace: inout [MemorySample]
     ) -> AmortizedResult? {
         // Auto-tune K so each loop takes ≥100 µs.
         let targetLoopNanos: UInt64 = 100_000
@@ -256,9 +264,19 @@ public struct Runner: Sendable {
 
         let samples = sampleCount.amortizedSamples
         var loopNanos = [UInt64](repeating: 0, count: samples)
+
+        // Start the continuous memory probe before the sampling window —
+        // 100 Hz reads of RSS, lock-protected. Loop wall ≥ 100 µs absorbs
+        // the probe's per-tick cost (sub-1 %); short loops may collect
+        // zero samples, which is fine.
+        let probeHandle = memoryProbe?.start(referenceTicks: clock.now(), clock: clock)
+
         for i in 0..<samples {
             if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
                 flags.insert(.truncated)
+                if let h = probeHandle, let probe = memoryProbe {
+                    memoryTrace = probe.stop(h)
+                }
                 return AmortizedResult(
                     iterationsPerBatch: K,
                     batchNanos: LatencyDistribution(samples: Array(loopNanos.prefix(i)))
@@ -271,6 +289,10 @@ public struct Runner: Sendable {
             }
             let t1 = clock.now()
             loopNanos[i] = clock.nanos(t1 &- t0)
+        }
+
+        if let h = probeHandle, let probe = memoryProbe {
+            memoryTrace = probe.stop(h)
         }
         return AmortizedResult(
             iterationsPerBatch: K,
@@ -390,12 +412,14 @@ public struct Runner: Sendable {
 
         // 5b. Amortized: build K inputs ONCE; snapshot originals; restore
         //     before each sample (M4 fix — never rebuild per sample).
+        var memoryTrace: [MemorySample] = []
         let amortized: AmortizedResult? = sampleCount.amortizedSamples > 0
             ? sampleAmortizedMutating(
                 workload, K: amortizedTargetK, baseSeed: baseSeed &+ 2,
                 caseStartTicks: caseStartTicks,
                 budgetNanos: perCaseBudgetNanos,
-                cancellation: cancellation, flags: &flags
+                cancellation: cancellation, flags: &flags,
+                memoryTrace: &memoryTrace
             )
             : nil
 
@@ -413,7 +437,7 @@ public struct Runner: Sendable {
             gflops: gflops,
             preSampleRSS: preRSS,
             postSampleRSS: postRSS,
-            memoryTrace: [],
+            memoryTrace: memoryTrace,
             thermalEvents: thermalEvents,
             timerOverheadNanos: timerOverheadNanos,
             verification: verification,
@@ -475,7 +499,8 @@ public struct Runner: Sendable {
         caseStartTicks: UInt64,
         budgetNanos: UInt64,
         cancellation: CancellationToken?,
-        flags: inout Set<CaseFlag>
+        flags: inout Set<CaseFlag>,
+        memoryTrace: inout [MemorySample]
     ) -> AmortizedResult? {
         // M4 fix: build the K-input bank ONCE before the sampling loop.
         // `originals` is a COW snapshot — assignment `inputs = originals`
@@ -490,9 +515,14 @@ public struct Runner: Sendable {
 
         let samples = sampleCount.amortizedSamples
         var loopNanos = [UInt64](repeating: 0, count: samples)
+        let probeHandle = memoryProbe?.start(referenceTicks: clock.now(), clock: clock)
+
         for i in 0..<samples {
             if shouldStop(caseStartTicks: caseStartTicks, budgetNanos: budgetNanos, cancellation: cancellation) {
                 flags.insert(.truncated)
+                if let h = probeHandle, let probe = memoryProbe {
+                    memoryTrace = probe.stop(h)
+                }
                 return AmortizedResult(
                     iterationsPerBatch: K,
                     batchNanos: LatencyDistribution(samples: Array(loopNanos.prefix(i)))
@@ -508,6 +538,10 @@ public struct Runner: Sendable {
             }
             let t1 = clock.now()
             loopNanos[i] = clock.nanos(t1 &- t0)
+        }
+
+        if let h = probeHandle, let probe = memoryProbe {
+            memoryTrace = probe.stop(h)
         }
         return AmortizedResult(
             iterationsPerBatch: K,
