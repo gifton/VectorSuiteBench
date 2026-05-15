@@ -361,4 +361,45 @@ If anything reads ambiguous, **stop and ask** before guessing — the Phase 1 re
 
 ## 8. State at end of Phase 2.0
 
-*(To be filled in by the agent that completes 2.0. Include commit hashes, final test count, and any in-flight follow-ups that should flow to 2.1.)*
+**Completed 2026-05-15.** All six items landed and pushed to `main`. The harness now runs end-to-end from the command line: `swift run vsb-run --preset smoke --skip-peaks` produces a complete `RunDocument` (manifest + per-case JSON + CSV rollup + index update) on disk.
+
+### Commit list (in order)
+
+| Item | Commit  | Title |
+|------|---------|-------|
+| 1    | `249c3ae` | RunController + RunnableWorkload dispatch |
+| 2    | `1b65614` | PeakMeasurement (FMA microkernel + STREAM-triad) |
+| 3    | `ed6c267` | CSVExporter + RunStore.finalizeRun wiring |
+| 4    | `d51d5ab` | Continuous MemoryProbe (Amortized only) |
+| 5    | `cac0c66` | vsb-run CLI in sibling Packages/VSBRun |
+| 6    | `f70f6f9` | End-to-end smoke tests via Process.run |
+
+### Test count
+
+**87 tests passing** across three packages (+19 from the 68 at start of 2.0):
+- BenchKit: 67 (+14 — RunnableWorkload, PeakMeasurement, CSVExporter, MemoryProbe, RunController wiring)
+- VSBCore: 17 (+2 — RunController integration tests)
+- VSBRun: 3 (new package)
+
+Wall time of the full suite: ~2 s (BenchKit ~0.4 s, VSBCore ~0.6 s, VSBRun ~1.1 s with the e2e subprocess spawn).
+
+### What this unlocks for Phase 2.1
+
+The CLI is now the canonical way to produce runs. The SwiftUI shell in 2.1 calls the same `RunController` in-process and reads its config from a settings sheet rather than argv — no new orchestration is required, only chart code + sidebar wiring against an already-populated `~/Library/Application Support/VectorSuiteBench/` tree.
+
+### Known follow-ups (carry to Phase 2.1)
+
+Non-blocking. Flag if you touch the affected code:
+
+- **MemoryProbe stop race (cosmetic).** `DispatchSource.cancel()` is non-blocking; the `stopped` flag closes most of the window but a handler invocation that already passed the flag check can still land one extra sample. The idempotency test accepts `0 ≤ delta ≤ 1`. Eliminating it entirely would require either holding the snapshot lock across the handler body (expensive) or a queue-drain `barrier_async`. Acceptable as-is.
+- **vsb-run filter parsing.** `--filter` accepts both op names and impl names, distinguished by which enum the string parses to. A token that happens to overlap both (none today, but plausible if future op families add e.g. an `accelerate` op) would be ambiguous. Consider `--op` / `--impl` as separate flags in 2.1.
+- **PeakMeasurement bandwidth allocation cost.** 128 MiB × 3 arrays = 384 MiB per measurement. Fine on M-series Macs but expensive on lower-RAM machines (M1 with 8 GB). Phase 2.1 could expose `bytesPerArray` on the CLI.
+- **gpuCoreCount = 0** (carry-over from Phase 1). Still unprobed; needs IORegistry. Skip until VectorAccelerate / Metal lands.
+- **`docs/libraries/*.md`** stayed untracked through the entire phase (pre-existing notes from May 11). Stage them when 2.1 starts if they're still relevant.
+- **Mid-run cancellation e2e** is not covered — the cancellation test pre-cancels via the token, and SIGINT mid-process is harder to exercise reliably from a Swift Testing suite. Worth adding if Phase 2.1 finds a stable harness for it.
+
+### Phase 2.1 territory (still untouched, as planned)
+
+- SwiftUI app shell (`RunConfigView`, `RunListSidebar`, `RunDetailView`, `DiffPaneView`).
+- First Swift Charts composition (likely `ThroughputBarChart` against an existing `samples.csv`).
+- The current `VectorSuiteBench/` Xcode app target is still the empty default template; the package code already drives everything the app needs to read.
