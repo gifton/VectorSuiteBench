@@ -22,10 +22,12 @@ public enum VSBCoreRegistry {
         DotFamily(),
     ]
 
-    /// All workloads as type-erased `WorkloadMetadata`. Concrete types are
+    /// All workloads as type-erased `RunnableWorkload`. Concrete types are
     /// kept distinct internally so the Runner dispatches with static
-    /// specialization at call sites.
-    public static let workloads: [any WorkloadMetadata] = families.flatMap { $0.workloads }
+    /// specialization at call sites; the `RunnableWorkload` parent protocol
+    /// lets RunController pick the right runner per case without an open
+    /// `switch` on protocol kind.
+    public static let workloads: [any RunnableWorkload] = families.flatMap { $0.workloads }
 
     // MARK: - Typed accessors for tests
 
@@ -59,8 +61,8 @@ public struct DotFamily: WorkloadFamily {
     public init() {}
     public var name: String { "dot" }
 
-    public var workloads: [any WorkloadMetadata] {
-        var all: [any WorkloadMetadata] = []
+    public var workloads: [any RunnableWorkload] {
+        var all: [any RunnableWorkload] = []
 
         // 1. Baseline (non-VectorCore) Dot impls × 5 sizes = 15
         for n in VSBCoreRegistry.baselineDotSizes {

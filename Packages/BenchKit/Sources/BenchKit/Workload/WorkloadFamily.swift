@@ -17,8 +17,11 @@ public protocol WorkloadFamily: Sendable {
     /// as a wire-name once published.
     var name: String { get }
 
-    /// All workloads contributed by this family, as type-erased
-    /// `WorkloadMetadata`. Concrete types are preserved internally so the
-    /// Runner can specialize at dispatch sites.
-    var workloads: [any WorkloadMetadata] { get }
+    /// All workloads contributed by this family, type-erased to the
+    /// `RunnableWorkload` existential so RunController can dispatch each
+    /// through the right runner without knowing its concrete shape.
+    /// `RunnableWorkload` itself refines `WorkloadMetadata`, so callers that
+    /// only need identifier/bytes/flops/inputDistribution can still treat
+    /// the elements as metadata.
+    var workloads: [any RunnableWorkload] { get }
 }
