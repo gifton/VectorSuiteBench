@@ -84,9 +84,20 @@ struct DotWorkloadTests {
         }
     }
 
-    @Test("Registry has 27 Dot cases")
-    func registryCount() {
-        #expect(VSBCoreRegistry.workloads.count == 27)
+    @Test("DotFamily contributes 27 Dot cases")
+    func dotCaseCount() {
+        // Filter by op so Phase 2 op-family additions don't break this assertion;
+        // only an enumeration regression in DotFamily will trip it.
+        let dotCases = VSBCoreRegistry.workloads.filter { $0.identifier.op == .dot }
+        #expect(dotCases.count == 27, "expected 27 dot cases; got \(dotCases.count)")
+    }
+
+    @Test("Registry families pattern: VSBCoreRegistry.workloads == flatMap of families")
+    func registryFamilyFlatMap() {
+        let direct = VSBCoreRegistry.workloads.map(\.identifier.canonicalString)
+        let viaFamilies = VSBCoreRegistry.families.flatMap(\.workloads).map(\.identifier.canonicalString)
+        #expect(direct == viaFamilies,
+                "registry.workloads must equal families.flatMap(\\.workloads) — pattern is the contract")
     }
 
     @Test("All registered Dot impls produce distinct WorkloadIDs")

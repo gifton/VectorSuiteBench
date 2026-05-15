@@ -14,7 +14,14 @@ public struct SchemaVersion: Codable, Hashable, Sendable, Comparable, CustomStri
 
     /// Current on-disk schema. Bump `minor` for additive changes; bump
     /// `major` and add a migration for breaking changes.
-    public static let current = SchemaVersion(major: 1, minor: 0)
+    ///
+    /// **Version history:**
+    /// - 1.0 — Phase 1 initial schema.
+    /// - 1.1 — Phase 1.5 added `ImplClass.naive` and `OpKind.null` (both
+    ///   additive enum cases with stable wire-names; older readers will
+    ///   throw `DecodingError` on encountering these — by design, since the
+    ///   migration path is "upgrade BenchKit," not silent value coercion).
+    public static let current = SchemaVersion(major: 1, minor: 1)
 
     public var description: String { "\(major).\(minor)" }
 

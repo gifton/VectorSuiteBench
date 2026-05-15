@@ -108,6 +108,59 @@ struct WorkloadIDTests {
         }
     }
 
+    @Test("ImplClass.naive Codable wire-name is frozen as \"naive\"")
+    func implClassNaiveWireName() throws {
+        let params = try CanonicalParams([:], impl: .naive, op: .dot, shape: .vector(n: 64))
+        let id = WorkloadID(
+            op: .dot, impl: .naive, implClass: .naive,
+            dtype: .f32, shape: .vector(n: 64), params: params
+        )
+        let encoded = try JSONEncoder().encode(id)
+        let json = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        let implClassValue = json?["implClass"] as? String
+        #expect(implClassValue == "naive",
+                "expected implClass wire-name \"naive\"; got \(String(describing: implClassValue))")
+        // Round-trip must preserve identity.
+        let decoded = try JSONDecoder().decode(WorkloadID.self, from: encoded)
+        #expect(decoded == id)
+    }
+
+    @Test("OpKind.null Codable wire-name is frozen as \"null\"")
+    func opKindNullWireName() throws {
+        let params = try CanonicalParams([:], impl: .naive, op: .null, shape: .vector(n: 1))
+        let id = WorkloadID(
+            op: .null, impl: .naive, implClass: .standard,
+            dtype: .f32, shape: .vector(n: 1), params: params
+        )
+        let encoded = try JSONEncoder().encode(id)
+        let json = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        let opValue = json?["op"] as? String
+        #expect(opValue == "null",
+                "expected op wire-name \"null\"; got \(String(describing: opValue))")
+        let decoded = try JSONDecoder().decode(WorkloadID.self, from: encoded)
+        #expect(decoded == id)
+    }
+
+    @Test("vectorflavor wire-names are frozen as \"optimized\" | \"generic\" | \"dynamic\"")
+    func vectorFlavorWireNames() throws {
+        for flavor in ["optimized", "generic", "dynamic"] {
+            let params = try CanonicalParams(
+                ["vectorflavor": flavor],
+                impl: .vectorCore, op: .dot, shape: .vector(n: 512)
+            )
+            let id = WorkloadID(
+                op: .dot, impl: .vectorCore, implClass: .standard,
+                dtype: .f32, shape: .vector(n: 512), params: params
+            )
+            let encoded = try JSONEncoder().encode(id)
+            let json = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+            let paramsJson = json?["params"] as? [String: Any]
+            let flavorValue = paramsJson?["vectorflavor"] as? String
+            #expect(flavorValue == flavor,
+                    "expected vectorflavor wire-name \"\(flavor)\"; got \(String(describing: flavorValue))")
+        }
+    }
+
     @Test("WorkloadID canonicalString is stable")
     func canonicalStringStable() throws {
         let p = try CanonicalParams(["vectorflavor": "optimized"], impl: .vectorCore, op: .dot, shape: .vector(n: 256))

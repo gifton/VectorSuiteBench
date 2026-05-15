@@ -43,6 +43,16 @@ public enum ImplKind: String, Codable, Hashable, Sendable, CaseIterable {
 /// summation has Wilkinson `O(N · ε)` error, not the `O(log₂N · ε)` of
 /// tree/pairwise reductions. Without a wider per-class window, naïve
 /// baselines at N≥1024 false-fail verification.
+///
+/// **`ImplClass` describes algorithm shape, not library identity** (per
+/// spec §9.14). Any impl that uses unfused left-to-right summation should
+/// declare `.naive` — typically `ImplKind.naive`, but conceivably a future
+/// Accelerate or simd flavor could too. The canonicalizer does NOT enforce
+/// `ImplClass.naive ⇔ ImplKind.naive` for this reason; the coupling is
+/// convention, not a constraint. Conversely, `.standard` is the default
+/// (tree/pairwise summation as in vDSP, SIMD-fused kernels), and
+/// `.approximate` flags deliberately precision-trading impls
+/// (fast-rsqrt, reduced-precision intermediates).
 public enum ImplClass: String, Codable, Hashable, Sendable, CaseIterable {
     case standard
     case naive
