@@ -38,8 +38,14 @@ public enum ImplKind: String, Codable, Hashable, Sendable, CaseIterable {
 /// every Float32 candidate has inherent O(N · ε_f32) drift from a Float64
 /// Kahan-Neumaier oracle. Bit-stability across runs is verified separately by
 /// BenchKit's determinism self-test, not by the ULP-vs-oracle check.
+///
+/// `.naive` is distinct from `.standard` because unfused left-to-right
+/// summation has Wilkinson `O(N · ε)` error, not the `O(log₂N · ε)` of
+/// tree/pairwise reductions. Without a wider per-class window, naïve
+/// baselines at N≥1024 false-fail verification.
 public enum ImplClass: String, Codable, Hashable, Sendable, CaseIterable {
     case standard
+    case naive
     case approximate
 }
 

@@ -13,8 +13,11 @@ public struct NaiveDotWorkload: BorrowingWorkload {
 
     public var identifier: WorkloadID {
         let params = try! CanonicalParams([:], impl: .naive, op: .dot, shape: .vector(n: n))
+        // .naive (not .standard) — unfused left-to-right summation has
+        // O(N · ε) drift, not O(log₂N · ε). Verification window widens
+        // accordingly so the baseline doesn't false-fail at large N.
         return WorkloadID(
-            op: .dot, impl: .naive, implClass: .standard,
+            op: .dot, impl: .naive, implClass: .naive,
             dtype: .f32, shape: .vector(n: n), params: params
         )
     }

@@ -35,11 +35,44 @@ struct DotWorkloadTests {
         try assertVerified(result, label: "vectorCore-metric")
     }
 
-    @Test("All five Dot impls produce distinct WorkloadIDs")
+    @Test("All registered Dot impls produce distinct WorkloadIDs")
     func distinctIDs() {
         let ids = VSBCoreRegistry.workloads.map(\.identifier.canonicalString)
         let set = Set(ids)
         #expect(set.count == ids.count, "found duplicate WorkloadIDs: \(ids)")
+    }
+
+    @Test("Naïve dot verifies at every baseline size")
+    func naiveAtAllSizes() async throws {
+        for n in VSBCoreRegistry.baselineDotSizes {
+            let result = await run(NaiveDotWorkload(n: n))
+            #expect(
+                result.verification.isVerified,
+                Comment(rawValue: "naïve dot at N=\(n) failed verification — likely a ULP-window mismatch")
+            )
+        }
+    }
+
+    @Test("Accelerate dot verifies at every baseline size")
+    func accelerateAtAllSizes() async throws {
+        for n in VSBCoreRegistry.baselineDotSizes {
+            let result = await run(AccelerateDotWorkload(n: n))
+            #expect(
+                result.verification.isVerified,
+                Comment(rawValue: "Accelerate dot at N=\(n) failed verification")
+            )
+        }
+    }
+
+    @Test("Apple simd dot verifies at every baseline size")
+    func simdAtAllSizes() async throws {
+        for n in VSBCoreRegistry.baselineDotSizes {
+            let result = await run(SimdDotWorkload(n: n))
+            #expect(
+                result.verification.isVerified,
+                Comment(rawValue: "simd dot at N=\(n) failed verification")
+            )
+        }
     }
 
     @Test("Raw kernel and metric variants disagree on sign")
