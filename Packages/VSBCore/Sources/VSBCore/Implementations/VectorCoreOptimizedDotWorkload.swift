@@ -33,12 +33,8 @@ public struct VectorCoreOptimizedDotWorkload: BorrowingWorkload {
     public var flops: Int { DotMetadata.flops(n: Self.dim) }
     public var inputDistribution: InputDistribution { .uniform }
 
-    public var referenceOracle: ReferenceOracle? {
-        makeDotOracle(
-            extractInput: { (input: Input) -> (a: [Float], b: [Float])? in
-                (input.aRaw, input.bRaw)
-            }
-        )
+    public var referenceOracle: ReferenceOracle<Input, Output>? {
+        makeDotOracle(extractInput: { ($0.aRaw, $0.bRaw) })
     }
 
     public func makeInput(rng: inout SplitMix64) -> Input {
@@ -93,11 +89,9 @@ public struct VectorCoreMetricDotWorkload: BorrowingWorkload {
     public var flops: Int { DotMetadata.flops(n: Self.dim) }
     public var inputDistribution: InputDistribution { .uniform }
 
-    public var referenceOracle: ReferenceOracle? {
+    public var referenceOracle: ReferenceOracle<Input, Output>? {
         makeDotOracle(
-            extractInput: { (input: Input) -> (a: [Float], b: [Float])? in
-                (input.aRaw, input.bRaw)
-            },
+            extractInput: { ($0.aRaw, $0.bRaw) },
             expectedSignTransform: { -$0 }    // metric returns −a·b
         )
     }

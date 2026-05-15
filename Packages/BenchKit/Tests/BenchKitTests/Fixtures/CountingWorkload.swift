@@ -44,7 +44,7 @@ struct CountingWorkload: BorrowingWorkload {
     var bytesMoved: Int { 0 }
     var flops: Int { 1 }
     var inputDistribution: InputDistribution { .uniform }
-    var referenceOracle: ReferenceOracle? { nil }
+    var referenceOracle: ReferenceOracle<Input, Output>? { nil }
 
     func makeInput(rng: inout SplitMix64) -> Input {
         Input(x: rng.nextFloat())

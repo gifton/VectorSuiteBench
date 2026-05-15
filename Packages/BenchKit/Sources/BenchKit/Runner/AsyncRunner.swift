@@ -247,6 +247,7 @@ public struct AsyncRunner: Sendable {
         var verifyInput = await workload.makeInput(rng: &rng)
         do {
             let candidate = try await workload.invoke(&verifyInput)
+            // Typed: oracle takes W.Input / W.Output directly.
             let reference = oracle.compute(verifyInput)
             let window = ulpTolerance(
                 op: workload.identifier.op,

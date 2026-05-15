@@ -24,13 +24,12 @@ struct NormalizeInPlaceSmokeWorkload: MutatingWorkload {
     var flops: Int { 3 * n }                                   // n muls + n adds + n divs (approx)
     var inputDistribution: InputDistribution { .uniform }
 
-    var referenceOracle: ReferenceOracle? {
+    var referenceOracle: ReferenceOracle<Input, Output>? {
         ReferenceOracle(
             compute: { input in
-                guard let typed = input as? Input else { return .scalar(.nan) }
                 var sumSq = 0.0
                 var c = 0.0
-                for x in typed.v {
+                for x in input.v {
                     let y = Double(x) * Double(x) - c
                     let t = sumSq + y
                     c = (t - sumSq) - y
@@ -39,11 +38,10 @@ struct NormalizeInPlaceSmokeWorkload: MutatingWorkload {
                 return .scalar(sumSq.squareRoot())
             },
             compare: { candidate, reference, window in
-                guard let candidateF = candidate as? Float,
-                      case .scalar(let refD) = reference else {
+                guard case .scalar(let refD) = reference else {
                     return .failed(maxUlpObserved: .max, window: window, sampleIndex: 0)
                 }
-                let diff = floatULPDistance(candidateF, Float(refD))
+                let diff = floatULPDistance(candidate, Float(refD))
                 if diff <= window {
                     return .verified(maxUlpObserved: diff)
                 } else {

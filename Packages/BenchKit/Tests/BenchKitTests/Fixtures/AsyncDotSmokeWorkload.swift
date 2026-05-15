@@ -24,14 +24,13 @@ struct AsyncDotSmokeWorkload: AsyncWorkload {
     var flops: Int { 2 * n }
     var inputDistribution: InputDistribution { .uniform }
 
-    var referenceOracle: ReferenceOracle? {
+    var referenceOracle: ReferenceOracle<Input, Output>? {
         ReferenceOracle(
             compute: { input in
-                guard let typed = input as? Input else { return .scalar(.nan) }
                 var sum = 0.0
                 var c = 0.0
-                for i in 0..<typed.a.count {
-                    let y = Double(typed.a[i]) * Double(typed.b[i]) - c
+                for i in 0..<input.a.count {
+                    let y = Double(input.a[i]) * Double(input.b[i]) - c
                     let t = sum + y
                     c = (t - sum) - y
                     sum = t
@@ -39,11 +38,10 @@ struct AsyncDotSmokeWorkload: AsyncWorkload {
                 return .scalar(sum)
             },
             compare: { candidate, reference, window in
-                guard let candidateF = candidate as? Float,
-                      case .scalar(let refD) = reference else {
+                guard case .scalar(let refD) = reference else {
                     return .failed(maxUlpObserved: .max, window: window, sampleIndex: 0)
                 }
-                let diff = floatULPDistance(candidateF, Float(refD))
+                let diff = floatULPDistance(candidate, Float(refD))
                 if diff <= window {
                     return .verified(maxUlpObserved: diff)
                 } else {

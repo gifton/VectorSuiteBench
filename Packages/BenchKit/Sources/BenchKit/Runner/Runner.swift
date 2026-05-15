@@ -307,6 +307,8 @@ public struct Runner: Sendable {
         }
         let verifyInput = workload.makeInput(rng: &rng)
         let candidate = workload.invoke(verifyInput)
+        // Typed: oracle.compute takes W.Input directly, oracle.compare takes
+        // W.Output. No `Any` casts; type mismatches are compile-time errors.
         let reference = oracle.compute(verifyInput)
         let window = ulpTolerance(
             op: workload.identifier.op,
@@ -538,8 +540,8 @@ public struct Runner: Sendable {
             return .unverifiable(reason: "no reference oracle declared")
         }
         var verifyInputs = workload.makeInputs(count: 1, rng: &rng)
-        // Build a snapshot of the input *before* mutation so the oracle sees
-        // the same pre-state the candidate did.
+        // Snapshot the input *before* mutation so the oracle sees the same
+        // pre-state the candidate did. Typed throughout.
         let snapshot = verifyInputs[0]
         let candidate = workload.invoke(&verifyInputs[0])
         let reference = oracle.compute(snapshot)

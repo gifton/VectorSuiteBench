@@ -43,8 +43,10 @@ public struct NullWorkload: BorrowingWorkload {
     public var flops: Int { 1 }    // one integer add — keeps GFLOP/s derivation honest (sentinel)
     public var inputDistribution: InputDistribution { .uniform }
 
-    /// No oracle. Self-bench is unverifiable by design.
-    public var referenceOracle: ReferenceOracle? { nil }
+    /// No oracle. Self-bench is unverifiable by design — verification will
+    /// report `.unverifiable("no reference oracle declared")` and the runner
+    /// proceeds to sample normally.
+    public var referenceOracle: ReferenceOracle<Input, Output>? { nil }
 
     public func makeInput(rng: inout SplitMix64) -> Input {
         Input(counter: rng.next())

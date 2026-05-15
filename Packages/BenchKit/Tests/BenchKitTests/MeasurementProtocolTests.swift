@@ -107,7 +107,7 @@ struct MeasurementProtocolTests {
             var bytesMoved: Int { 0 }
             var flops: Int { 1 }
             var inputDistribution: InputDistribution { .uniform }
-            var referenceOracle: ReferenceOracle? { nil }
+            var referenceOracle: ReferenceOracle<Input, Output>? { nil }
             func makeInput(rng: inout SplitMix64) -> Input { Input() }
             @inline(never)
             func invoke(_ input: borrowing Input) -> Output {

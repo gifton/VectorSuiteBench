@@ -23,12 +23,8 @@ public struct NaiveDotWorkload: BorrowingWorkload {
     public var flops: Int { DotMetadata.flops(n: n) }
     public var inputDistribution: InputDistribution { .uniform }
 
-    public var referenceOracle: ReferenceOracle? {
-        makeDotOracle(
-            extractInput: { (input: RawFloatDotInput) -> (a: [Float], b: [Float])? in
-                (input.a, input.b)
-            }
-        )
+    public var referenceOracle: ReferenceOracle<Input, Output>? {
+        makeDotOracle(extractInput: { ($0.a, $0.b) })
     }
 
     public func makeInput(rng: inout SplitMix64) -> Input {

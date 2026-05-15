@@ -9,6 +9,11 @@ public protocol BorrowingWorkload: WorkloadMetadata {
     associatedtype Input
     associatedtype Output
 
+    /// Typed reference oracle. `nil` for workloads with no semantic output
+    /// to verify (e.g., `NullWorkload`). Workloads with non-nil oracles
+    /// MUST have their output verified before perf sampling.
+    var referenceOracle: ReferenceOracle<Input, Output>? { get }
+
     /// Build a single deterministic input. Called once per case.
     func makeInput(rng: inout SplitMix64) -> Input
 
@@ -22,17 +27,18 @@ public protocol BorrowingWorkload: WorkloadMetadata {
 /// A workload whose `invoke` mutates its input (axpy, in-place normalize, …).
 ///
 /// In Amortized mode the runner pre-allocates K independent inputs via
-/// `makeInputs(count: K, rng:)` and rotates per iteration — re-using a single
-/// mutated input across thousands of iterations drifts toward NaN/Inf,
-/// triggering severe microcode penalties for denormal/NaN math and corrupting
-/// the measurement.
+/// `makeInputs(count: K, rng:)`, snapshots them, and restores per sample —
+/// re-using a single mutated input across thousands of iterations drifts
+/// toward NaN/Inf, triggering severe microcode penalties.
 ///
-/// In single-shot mode the runner pre-allocates N inputs (one per sample) and
-/// consumes one per timed call. The build cost lives outside the timing
+/// In single-shot mode the runner pre-allocates N inputs (one per sample)
+/// and consumes one per timed call. The build cost lives outside the timing
 /// window.
 public protocol MutatingWorkload: WorkloadMetadata {
     associatedtype Input
     associatedtype Output
+
+    var referenceOracle: ReferenceOracle<Input, Output>? { get }
 
     /// Build `count` independent deterministic inputs.
     func makeInputs(count K: Int, rng: inout SplitMix64) -> [Input]
@@ -52,6 +58,8 @@ public protocol MutatingWorkload: WorkloadMetadata {
 public protocol AsyncWorkload: WorkloadMetadata {
     associatedtype Input
     associatedtype Output
+
+    var referenceOracle: ReferenceOracle<Input, Output>? { get }
 
     func makeInput(rng: inout SplitMix64) async -> Input
     func invoke(_ input: inout Input) async throws -> Output
