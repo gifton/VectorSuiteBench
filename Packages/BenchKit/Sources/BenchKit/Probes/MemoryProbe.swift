@@ -45,7 +45,12 @@ public final class MemoryProbe: @unchecked Sendable {
             repeating: .milliseconds(intervalMillis),
             leeway: .milliseconds(1)
         )
+        // `DispatchSource.cancel()` is non-blocking; a handler invocation
+        // queued before cancel can still fire. The `stopped` flag is the
+        // race guard: `stop()` sets it before calling `cancel()`, so any
+        // late firing is a no-op.
         timer.setEventHandler {
+            guard !state.isStopped else { return }
             let now = clock.now()
             let rss = MemoryProbe.readResidentSize()
             let sample = MemorySample(
@@ -58,10 +63,13 @@ public final class MemoryProbe: @unchecked Sendable {
         return Handle(timer: timer, state: state)
     }
 
-    /// End sampling and return the accumulated trace. Cancelling the timer
-    /// is synchronous on Darwin — by the time this returns no further
-    /// handler invocations are pending.
+    /// End sampling and return the accumulated trace. Sets the state's
+    /// `stopped` flag *before* cancelling the timer so any in-flight
+    /// handler invocation observes it and short-circuits — `DispatchSource
+    /// .cancel()` is non-blocking, so without this flag a late firing
+    /// would race past our snapshot read.
     public func stop(_ handle: Handle) -> [MemorySample] {
+        handle.state.markStopped()
         handle.timer.cancel()
         return handle.state.snapshot()
     }
@@ -92,6 +100,7 @@ public final class MemoryProbe: @unchecked Sendable {
     /// allocator pressure under load.
     fileprivate final class SampleState: @unchecked Sendable {
         private let lock = OSAllocatedUnfairLock<[MemorySample]>(initialState: [])
+        private let stoppedLock = OSAllocatedUnfairLock<Bool>(initialState: false)
 
         func append(_ sample: MemorySample) {
             lock.withLock { $0.append(sample) }
@@ -99,6 +108,14 @@ public final class MemoryProbe: @unchecked Sendable {
 
         func snapshot() -> [MemorySample] {
             lock.withLock { $0 }
+        }
+
+        var isStopped: Bool {
+            stoppedLock.withLock { $0 }
+        }
+
+        func markStopped() {
+            stoppedLock.withLock { $0 = true }
         }
     }
 }
