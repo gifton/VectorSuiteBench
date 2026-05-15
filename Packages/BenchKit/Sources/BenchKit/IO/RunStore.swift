@@ -69,6 +69,13 @@ public final class RunStore: Sendable {
         casesDirectory(for: runID).appendingPathComponent("\(caseHash).json")
     }
 
+    /// Per-run CSV rollup. Written by `finalizeRun` from the assembled
+    /// `RunDocument` so a fresh run always has `samples.csv` alongside its
+    /// `manifest.json`.
+    public func samplesCSVURL(for runID: String) -> URL {
+        runDirectory(for: runID).appendingPathComponent("samples.csv")
+    }
+
     public func peakURL(for hardwareFingerprint: String) -> URL {
         rootURL.appendingPathComponent("peaks", isDirectory: true)
               .appendingPathComponent("\(hardwareFingerprint).json")
@@ -95,8 +102,9 @@ public final class RunStore: Sendable {
         try writeAtomic(result, to: url)
     }
 
-    /// Finalize a run: load all case files, assemble the `RunDocument`, and
-    /// update `index.json` with this run's summary.
+    /// Finalize a run: load all case files, assemble the `RunDocument`,
+    /// write the per-run `samples.csv` rollup, and update `index.json` with
+    /// this run's summary.
     @discardableResult
     public func finalizeRun(runID: String) throws -> RunDocument {
         let manifest = try readJSON(ManifestPayload.self, at: manifestURL(for: runID))
@@ -106,6 +114,7 @@ public final class RunStore: Sendable {
             runMetadata: manifest.runMetadata,
             cases: cases
         )
+        try CSVExporter.write(document, to: samplesCSVURL(for: runID))
         try updateIndex(with: document)
         return document
     }
