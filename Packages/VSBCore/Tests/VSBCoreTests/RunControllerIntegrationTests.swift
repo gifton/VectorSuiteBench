@@ -28,7 +28,8 @@ struct RunControllerIntegrationTests {
             registry: filtered,
             store: store,
             preset: .smoke,
-            allowDebugBuildsForTesting: true
+            allowDebugBuildsForTesting: true,
+            measurePeaks: false      // keep the harness self-bench fast in tests
         )
         let document = try await controller.run()
 
@@ -90,7 +91,8 @@ struct RunControllerIntegrationTests {
             store: store,
             preset: .smoke,
             cancellation: token,
-            allowDebugBuildsForTesting: true
+            allowDebugBuildsForTesting: true,
+            measurePeaks: false
         )
 
         // Cancel *before* run() — every case after the first check is skipped.

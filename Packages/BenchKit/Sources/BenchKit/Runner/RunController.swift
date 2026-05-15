@@ -22,6 +22,7 @@ public struct RunController: Sendable {
     public let cancellation: CancellationToken?
     public let gitWorkingDirectory: URL?
     public let allowDebugBuildsForTesting: Bool
+    public let measurePeaks: Bool
 
     public init(
         registry: [any RunnableWorkload],
@@ -30,7 +31,8 @@ public struct RunController: Sendable {
         runID: String? = nil,
         cancellation: CancellationToken? = nil,
         gitWorkingDirectory: URL? = nil,
-        allowDebugBuildsForTesting: Bool = false
+        allowDebugBuildsForTesting: Bool = false,
+        measurePeaks: Bool = true
     ) {
         self.registry = registry
         self.store = store
@@ -38,6 +40,7 @@ public struct RunController: Sendable {
         self.cancellation = cancellation
         self.gitWorkingDirectory = gitWorkingDirectory
         self.allowDebugBuildsForTesting = allowDebugBuildsForTesting
+        self.measurePeaks = measurePeaks
         self.runID = runID ?? Self.generatedRunID(preset: preset)
     }
 
@@ -58,6 +61,13 @@ public struct RunController: Sendable {
         let previousFPCR = FPCRState.enableFlushToZero()
         defer { FPCRState.restore(previousFPCR) }
         let fpcrAtStart = FPCRState.current()
+
+        // 1b. Ensure empirical-peak record exists for this hardware. Runs the
+        //     FMA microkernel + STREAM-triad on cache miss / stale method.
+        //     Tests opt out so the suite stays fast.
+        if measurePeaks {
+            _ = try? await PeakMeasurement.ensureCached(for: hardware, in: store)
+        }
 
         // Preset-derived budget + sample count.
         let budget = preset.defaultBudget
