@@ -2,6 +2,7 @@ import Testing
 import Foundation
 @testable import VSBCore
 @testable import BenchKit
+import VectorCore
 
 @Suite("VSBCore Dot workloads")
 struct DotWorkloadTests {
@@ -33,6 +34,59 @@ struct DotWorkloadTests {
     func vectorCoreMetric() async throws {
         let result = await run(VSBCoreRegistry.vectorCoreMetricDot512)
         try assertVerified(result, label: "vectorCore-metric")
+    }
+
+    @Test("VectorCore optimized dot at dim 1536 verifies")
+    func vectorCoreOptimized1536() async throws {
+        let result = await run(VSBCoreRegistry.vectorCoreOptimizedDot1536)
+        try assertVerified(result, label: "vectorCore-optimized-1536")
+    }
+
+    @Test("VectorCore generic dot verifies at every available static dim")
+    func vectorCoreGenericAcrossDims() async throws {
+        // Available static dims of our 5-size set: 64, 256, 512, 1536.
+        let workloads: [(label: String, workload: any BorrowingWorkload)] = [
+            ("generic-Dim64", VectorCoreGenericDotWorkload<Dim64>()),
+            ("generic-Dim256", VectorCoreGenericDotWorkload<Dim256>()),
+            ("generic-Dim512", VectorCoreGenericDotWorkload<Dim512>()),
+            ("generic-Dim1536", VectorCoreGenericDotWorkload<Dim1536>()),
+        ]
+        // any-existential can't be passed to a generic Runner.run, so test each
+        // via a small static-dim helper inline.
+        let runner = Runner(
+            runID: "vc-generic-test",
+            budget: .smoke,
+            sampleCount: SampleCount(singleShotMax: 16, amortizedSamples: 4)
+        )
+        let r64 = await runner.run(VectorCoreGenericDotWorkload<Dim64>())
+        let r256 = await runner.run(VectorCoreGenericDotWorkload<Dim256>())
+        let r512 = await runner.run(VectorCoreGenericDotWorkload<Dim512>())
+        let r1536 = await runner.run(VectorCoreGenericDotWorkload<Dim1536>())
+        for (label, result) in [
+            ("Dim64", r64), ("Dim256", r256), ("Dim512", r512), ("Dim1536", r1536),
+        ] {
+            #expect(
+                result.verification.isVerified,
+                Comment(rawValue: "VectorCore generic at \(label) failed verification")
+            )
+        }
+        _ = workloads  // Silence unused warning (above table is documentation).
+    }
+
+    @Test("VectorCore dynamic dot verifies at every baseline size including N=4096")
+    func vectorCoreDynamicAcrossSizes() async throws {
+        for n in VSBCoreRegistry.baselineDotSizes {
+            let result = await run(VectorCoreDynamicDotWorkload(n: n))
+            #expect(
+                result.verification.isVerified,
+                Comment(rawValue: "VectorCore dynamic at N=\(n) failed verification")
+            )
+        }
+    }
+
+    @Test("Registry has 27 Dot cases")
+    func registryCount() {
+        #expect(VSBCoreRegistry.workloads.count == 27)
     }
 
     @Test("All registered Dot impls produce distinct WorkloadIDs")
