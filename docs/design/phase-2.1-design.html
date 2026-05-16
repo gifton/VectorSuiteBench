@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>VectorSuiteBench · Design Doc</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:        #15161a;
+      --surface0:  #1b1c21;
+      --surface1:  #22232a;
+      --surface2:  #2a2c34;
+      --surface3:  #33353e;
+      --hair:      rgba(255,255,255,0.06);
+      --hair2:     rgba(255,255,255,0.10);
+      --divider:   rgba(255,255,255,0.14);
+      --text-hi:   #e7e8ec;
+      --text-md:   #a4a6ae;
+      --text-lo:   #6c6e78;
+      --text-dim:  #4a4c54;
+      --vc:        oklch(74% 0.17 198);
+      --vc-soft:   oklch(74% 0.17 198 / 0.18);
+      --vdsp:      oklch(68% 0.04 50);
+      --accel:     oklch(68% 0.04 270);
+      --metal:     oklch(68% 0.04 320);
+      --naive:     oklch(58% 0.02 250);
+      --pass:      oklch(72% 0.16 148);
+      --fail:      oklch(67% 0.20 25);
+      --warn:      oklch(80% 0.15 80);
+      --info:      oklch(72% 0.12 235);
+      --ui:        -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+      --mono:      "JetBrains Mono", "SF Mono", "Menlo", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text-hi); font-family: var(--ui); font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+    body { font-feature-settings: 'ss01','cv11'; }
+
+    /* layout: sticky TOC + reading column */
+    .layout { display: grid; grid-template-columns: 260px 1fr; max-width: 1180px; margin: 0 auto; gap: 60px; padding: 56px 32px 120px; }
+    @media (max-width: 880px) { .layout { grid-template-columns: 1fr; gap: 32px; padding: 32px 20px 80px; } .toc { position: static !important; } }
+
+    /* TOC */
+    .toc { position: sticky; top: 32px; align-self: start; max-height: calc(100vh - 64px); overflow-y: auto; font-family: var(--ui); font-size: 12.5px; }
+    .toc .eyebrow { font-family: var(--mono); font-size: 10px; color: var(--text-lo); letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 14px; }
+    .toc h2 { font-size: 14px; font-weight: 600; color: var(--text-hi); letter-spacing: -0.2px; margin: 0 0 4px; }
+    .toc .meta { font-family: var(--mono); font-size: 10.5px; color: var(--text-lo); margin-bottom: 22px; line-height: 1.6; }
+    .toc ol { list-style: none; padding: 0; margin: 0; counter-reset: toc; }
+    .toc li:not(.sub) { counter-increment: toc; }
+    .toc li a {
+      display: flex; gap: 10px; align-items: baseline;
+      padding: 6px 0; color: var(--text-md); text-decoration: none; border-left: 1px solid var(--hair); padding-left: 12px;
+      transition: color .12s, border-color .12s;
+    }
+    .toc li a::before { content: counter(toc, decimal-leading-zero); font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+    .toc li a:hover { color: var(--text-hi); border-left-color: var(--vc); }
+    .toc li.sub a { padding-left: 24px; font-size: 12px; color: var(--text-lo); }
+    .toc li.sub a::before { content: ''; }
+    .toc .actions { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
+    .toc .actions a {
+      font-family: var(--mono); font-size: 11px; color: var(--text-md);
+      padding: 7px 10px; border-radius: 6px; background: var(--surface0);
+      border: 0.5px solid var(--hair); text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .toc .actions a:hover { color: var(--vc); border-color: rgba(57,196,231,0.4); }
+
+    /* doc column */
+    .doc { max-width: 780px; }
+    .doc > section { padding: 56px 0; border-top: 1px solid var(--hair); }
+    .doc > section:first-child { padding-top: 0; border-top: 0; }
+
+    .eyebrow { font-family: var(--mono); font-size: 10.5px; color: var(--vc); letter-spacing: 1.4px; text-transform: uppercase; margin-bottom: 14px; font-weight: 600; }
+    h1 { font-size: 38px; font-weight: 700; letter-spacing: -1.1px; line-height: 1.05; margin: 0 0 18px; }
+    h2 { font-size: 26px; font-weight: 600; letter-spacing: -0.5px; line-height: 1.15; margin: 0 0 14px; }
+    h3 { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; margin: 40px 0 10px; color: var(--text-hi); }
+    h4 { font-size: 13px; font-weight: 600; color: var(--text-md); text-transform: uppercase; letter-spacing: 0.6px; margin: 28px 0 8px; font-family: var(--ui); }
+
+    p { color: var(--text-md); margin: 0 0 14px; text-wrap: pretty; }
+    p strong { color: var(--text-hi); font-weight: 600; }
+    p code, li code, td code, th code { font-family: var(--mono); font-size: 0.86em; color: var(--text-hi); background: rgba(255,255,255,0.04); padding: 1px 5px; border-radius: 3px; border: 0.5px solid var(--hair); }
+    ul, ol { color: var(--text-md); padding-left: 20px; margin: 0 0 16px; }
+    li { margin-bottom: 6px; text-wrap: pretty; }
+    a.deep { color: var(--vc); text-decoration: none; border-bottom: 1px dashed rgba(57,196,231,0.5); }
+    a.deep:hover { border-bottom-style: solid; }
+
+    .lede { font-size: 17px; color: var(--text-hi); font-weight: 400; line-height: 1.55; max-width: 660px; }
+    .lede strong { font-weight: 600; }
+
+    .meta-row {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+      border: 1px solid var(--hair); border-radius: 8px; overflow: hidden; margin: 28px 0 0;
+      background: var(--surface0);
+    }
+    .meta-row > div { padding: 12px 14px; border-right: 1px solid var(--hair); }
+    .meta-row > div:last-child { border-right: 0; }
+    .meta-row .k { font-family: var(--ui); font-size: 10px; color: var(--text-lo); letter-spacing: 0.5px; text-transform: uppercase; font-weight: 600; }
+    .meta-row .v { font-family: var(--mono); font-size: 12.5px; color: var(--text-hi); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+    /* principle/decision boxes */
+    .principles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0 6px; }
+    .p-card {
+      padding: 14px 16px; border-radius: 8px; background: var(--surface0);
+      border: 0.5px solid var(--hair);
+    }
+    .p-card .num { font-family: var(--mono); font-size: 10px; color: var(--vc); letter-spacing: 1.2px; font-weight: 700; }
+    .p-card .ttl { font-size: 13.5px; font-weight: 600; color: var(--text-hi); margin: 4px 0 6px; letter-spacing: -0.15px; }
+    .p-card p { font-size: 12.5px; line-height: 1.5; margin: 0; color: var(--text-md); }
+
+    /* do/don't */
+    .dodont { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0 6px; }
+    .dodont .col { padding: 14px 16px; border-radius: 8px; border: 0.5px solid var(--hair); }
+    .dodont .do { background: rgba(74,222,128,0.04); border-color: rgba(74,222,128,0.25); }
+    .dodont .dont { background: rgba(239,68,68,0.04); border-color: rgba(239,68,68,0.25); }
+    .dodont h5 { margin: 0 0 8px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.8px; font-weight: 700; }
+    .dodont .do h5 { color: var(--pass); }
+    .dodont .dont h5 { color: var(--fail); }
+    .dodont ul { margin: 0; padding-left: 16px; }
+    .dodont li { font-size: 12.5px; line-height: 1.5; color: var(--text-md); }
+
+    /* tables */
+    table { width: 100%; border-collapse: collapse; margin: 14px 0 6px; font-family: var(--ui); font-size: 12.5px; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--hair); vertical-align: top; }
+    th { font-family: var(--ui); font-size: 10px; color: var(--text-lo); letter-spacing: 0.5px; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid var(--hair2); background: rgba(255,255,255,0.02); }
+    td { color: var(--text-md); }
+    td:first-child, th:first-child { color: var(--text-hi); font-weight: 500; }
+    td code { white-space: nowrap; }
+
+    /* cross-reference card to the design file */
+    .xref {
+      display: flex; align-items: center; gap: 16px;
+      margin: 22px 0; padding: 14px 16px;
+      border-radius: 10px; background: linear-gradient(180deg, #1d1e23, #181a1f);
+      border: 0.5px solid var(--hair2);
+      text-decoration: none; color: inherit;
+      transition: border-color .12s, background .12s;
+    }
+    .xref:hover { border-color: rgba(57,196,231,0.45); background: linear-gradient(180deg, #1f2128, #1a1c22); }
+    .xref .thumb {
+      flex-shrink: 0; width: 88px; height: 60px; border-radius: 4px;
+      background: var(--bg); border: 0.5px solid var(--hair2);
+      position: relative; overflow: hidden;
+    }
+    .xref .thumb svg { display: block; width: 100%; height: 100%; }
+    .xref .body { flex: 1; min-width: 0; }
+    .xref .eyebrow { margin-bottom: 4px; }
+    .xref .ttl { font-size: 13.5px; font-weight: 600; color: var(--text-hi); letter-spacing: -0.15px; margin: 0 0 3px; }
+    .xref .meta { font-family: var(--mono); font-size: 10.5px; color: var(--text-lo); }
+    .xref .arrow { color: var(--vc); font-family: var(--mono); font-size: 14px; flex-shrink: 0; }
+    /* fallback diagram box */
+    .frame {
+      padding: 18px; background: linear-gradient(180deg, #1c1d23, #16171c);
+      border: 0.5px solid var(--hair); border-radius: 8px; margin: 18px 0;
+    }
+    .frame svg { display: block; max-width: 100%; height: auto; }
+    .caption { font-family: var(--mono); font-size: 11px; color: var(--text-lo); margin-top: 10px; line-height: 1.5; }
+    .caption strong { color: var(--text-hi); font-weight: 600; }
+
+    /* swatch row */
+    .palette { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin: 16px 0 6px; }
+    .palette .sw { aspect-ratio: 1.6; border-radius: 6px; position: relative; border: 0.5px solid var(--hair2); display: flex; flex-direction: column; justify-content: flex-end; padding: 8px; }
+    .palette .sw .nm { font-family: var(--mono); font-size: 9.5px; color: rgba(0,0,0,0.7); font-weight: 700; }
+    .palette .sw.dark .nm { color: rgba(255,255,255,0.85); }
+
+    /* badge previews */
+    .badges { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 6px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 3px;
+      font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.4px; line-height: 1.1;
+    }
+    .pill.pass { background: rgba(74,222,128,0.10); color: var(--pass); border: 0.5px solid rgba(74,222,128,0.33); }
+    .pill.fail { background: rgba(239,68,68,0.12); color: var(--fail); border: 0.5px solid rgba(239,68,68,0.33); }
+    .pill.warn { background: rgba(245,158,11,0.10); color: var(--warn); border: 0.5px solid rgba(245,158,11,0.33); }
+    .pill.info { background: rgba(122,170,255,0.10); color: var(--info); border: 0.5px solid rgba(122,170,255,0.33); }
+    .pill.neutral { background: rgba(255,255,255,0.05); color: var(--text-md); border: 0.5px solid var(--hair2); }
+    .pill.approx { background: transparent; color: var(--text-lo); border: 1px dashed currentColor; }
+    .pill.accent { background: var(--vc-soft); color: var(--vc); border: 0.5px solid rgba(57,196,231,0.4); }
+
+    /* anchor offset */
+    section[id] { scroll-margin-top: 24px; }
+
+    /* footer */
+    footer { padding: 40px 32px; max-width: 1180px; margin: 0 auto; border-top: 1px solid var(--hair); display: flex; gap: 16px; justify-content: space-between; flex-wrap: wrap; font-family: var(--mono); font-size: 10.5px; color: var(--text-lo); }
+
+    /* keys */
+    kbd {
+      font-family: var(--mono); font-size: 10.5px; padding: 1px 5px; border-radius: 3px;
+      background: rgba(255,255,255,0.06); border: 0.5px solid var(--hair2); color: var(--text-hi);
+    }
+
+    /* status pill grid */
+    .statusgrid { display: grid; grid-template-columns: 90px 1fr; gap: 10px 14px; margin: 14px 0 6px; align-items: center; }
+    .statusgrid > .label { display: flex; }
+    .statusgrid > .desc { font-size: 12.5px; color: var(--text-md); }
+
+    /* small inline figure SVG */
+    .glyph { stroke: var(--text-md); fill: none; stroke-width: 1.3; }
+    .glyph .accent { stroke: var(--vc); }
+    .glyph text { font-family: var(--mono); font-size: 9.5px; fill: var(--text-lo); }
+    .glyph .label { font-family: var(--ui); font-size: 10px; fill: var(--text-md); }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- TOC -->
+  <aside class="toc">
+    <div class="eyebrow">Design Doc</div>
+    <h2>VectorSuiteBench</h2>
+    <div class="meta">v0.1 · 2026-05-15<br/>Author: design<br/>Status: <span style="color:var(--warn)">in review</span></div>
+    <ol>
+      <li><a href="#summary">Summary &amp; principles</a></li>
+      <li><a href="#system">Design system</a></li>
+      <li class="sub"><a href="#sys-color">Color &amp; semantics</a></li>
+      <li class="sub"><a href="#sys-type">Typography</a></li>
+      <li class="sub"><a href="#sys-badges">Badges &amp; treatments</a></li>
+      <li><a href="#ia">Information architecture</a></li>
+      <li><a href="#main">Main Window</a></li>
+      <li class="sub"><a href="#main-sidebar">Sidebar</a></li>
+      <li class="sub"><a href="#main-summary">Run Summary header</a></li>
+      <li class="sub"><a href="#main-table">Data Table</a></li>
+      <li><a href="#modal">New Run modal</a></li>
+      <li><a href="#charts">Chart suite</a></li>
+      <li class="sub"><a href="#chart-roofline">Roofline</a></li>
+      <li class="sub"><a href="#chart-histogram">Latency Histogram</a></li>
+      <li><a href="#edges">Edge cases</a></li>
+      <li><a href="#open">Open questions</a></li>
+    </ol>
+    <div class="actions">
+      <a href="VectorSuiteBench.html" target="_blank">⤴  open design file →</a>
+    </div>
+  </aside>
+
+  <!-- DOC -->
+  <main class="doc">
+
+    <!-- 1. Summary -->
+    <section id="summary">
+      <div class="eyebrow">01 · Summary</div>
+      <h1>A benchmarking harness with an opinion.</h1>
+      <p class="lede">
+        VectorSuiteBench is a native macOS app for measuring the high‑performance limits of Apple‑Silicon vector
+        math. The design philosophy is <strong>data‑dense and analytical</strong> — closer to a profiler than a
+        consumer dashboard. Whitespace is earned, not assumed; every glyph supports the math it describes.
+      </p>
+
+      <div class="meta-row">
+        <div><div class="k">Platform</div><div class="v">macOS 14+ · SwiftUI</div></div>
+        <div><div class="k">Primary mode</div><div class="v">Dark · System Tint</div></div>
+        <div><div class="k">Charts</div><div class="v">Swift Charts</div></div>
+        <div><div class="k">Persona</div><div class="v">systems · perf eng</div></div>
+      </div>
+
+      <h3>Design principles</h3>
+      <div class="principles">
+        <div class="p-card">
+          <div class="num">P · 01</div>
+          <div class="ttl">Trust the numbers, not the chrome.</div>
+          <p>Number cells are SF Mono with tabular figures; the UI is allowed to be utilitarian so a 12-row diff scans without re-flowing characters.</p>
+        </div>
+        <div class="p-card">
+          <div class="num">P · 02</div>
+          <div class="ttl">One vibrant accent. One subject.</div>
+          <p>VectorCore owns the only saturated color in the app. Baselines (vDSP, Accelerate, Metal, naïve) are deliberately muted graphites so the reader's eye lands on the candidate under test.</p>
+        </div>
+        <div class="p-card">
+          <div class="num">P · 03</div>
+          <div class="ttl">Refuse to mislead.</div>
+          <p>Failed verifications redact perf to <code>—</code> / <code>ERR</code>. Approximate math is visually demoted (hatched, dashed, muted) so a faster-but-wrong algorithm is never read as "winning".</p>
+        </div>
+        <div class="p-card">
+          <div class="num">P · 04</div>
+          <div class="ttl">Statistical stance is visible.</div>
+          <p>P50 · P99 · P999 are first-class; no mean ever ships in a chart axis or table column. Mode (Single-Shot / Looped) is always labelled with a capsule on the same row as its number.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Design system -->
+    <section id="system">
+      <div class="eyebrow">02 · Design system</div>
+      <h2>Tokens</h2>
+      <p>
+        The token sheet ships as the first artboard in the design file. Surfaces are warm-neutral charcoals on a
+        narrow lightness ramp (4 steps) so the eye can place rows without re-reading them. All accent colors
+        share matched chroma (~0.16) and vary only by hue — they sit at the same perceived weight so badges
+        don't shout over each other.
+      </p>
+
+      <h3 id="sys-color">Color &amp; semantics</h3>
+      <div class="palette">
+        <div class="sw dark" style="background:#15161a"><span class="nm">bg</span></div>
+        <div class="sw dark" style="background:#1b1c21"><span class="nm">s0</span></div>
+        <div class="sw dark" style="background:#22232a"><span class="nm">s1</span></div>
+        <div class="sw dark" style="background:#2a2c34"><span class="nm">s2</span></div>
+        <div class="sw dark" style="background:#33353e"><span class="nm">s3</span></div>
+        <div class="sw" style="background:oklch(74% 0.17 198)"><span class="nm">VectorCore</span></div>
+        <div class="sw dark" style="background:oklch(68% 0.04 50)"><span class="nm">vDSP</span></div>
+        <div class="sw dark" style="background:oklch(68% 0.04 270)"><span class="nm">Accel</span></div>
+      </div>
+      <div class="palette" style="grid-template-columns:repeat(6,1fr)">
+        <div class="sw dark" style="background:oklch(68% 0.04 320)"><span class="nm">Metal</span></div>
+        <div class="sw dark" style="background:oklch(58% 0.02 250)"><span class="nm">naïve</span></div>
+        <div class="sw" style="background:oklch(72% 0.16 148)"><span class="nm">pass</span></div>
+        <div class="sw" style="background:oklch(67% 0.20 25)"><span class="nm">fail</span></div>
+        <div class="sw" style="background:oklch(80% 0.15 80)"><span class="nm">warn</span></div>
+        <div class="sw" style="background:oklch(72% 0.12 235)"><span class="nm">info</span></div>
+      </div>
+
+      <table>
+        <thead><tr><th>Token</th><th>Use</th><th>Rationale</th></tr></thead>
+        <tbody>
+          <tr><td><code>--vsb-impl-vectorcore</code></td><td>Subject under test</td><td>Vibrant cyan owns the page; every chart point/bar in this hue is "us".</td></tr>
+          <tr><td><code>--vsb-impl-vdsp / accel / metal</code></td><td>Baselines</td><td>Hue-varying graphites at chroma 0.04 — distinct enough to identify, muted enough not to compete.</td></tr>
+          <tr><td><code>--vsb-pass / fail / warn / info</code></td><td>Verification &amp; flags</td><td>Matched chroma (~0.16) so a pass and a fail badge feel equally weighted; the meaning is in the hue, not the loudness.</td></tr>
+          <tr><td><code>--vsb-text-hi / md / lo / dim</code></td><td>4-step text ramp</td><td>Most numbers read at <code>hi</code>; supporting labels at <code>lo</code>; redacted ERR text uses <code>fail</code>.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="sys-type">Typography</h3>
+      <p>
+        Two families, three roles. SF Pro Text (Inter as the web fallback) carries all UI labels, titles, and
+        prose. <strong>SF Mono with <code>monospacedDigit()</code> / <code>tabular-nums</code> is strictly required
+        for every number, every Git SHA, every axis label</strong>: a P99 number jittering by half a character
+        across rows is the kind of cognitive tax that erodes trust in a benchmarking tool.
+      </p>
+      <table>
+        <thead><tr><th>Role</th><th>Spec</th><th>Used for</th></tr></thead>
+        <tbody>
+          <tr><td>display</td><td>SF Pro · 22/600/−0.4</td><td>Canvas / artboard titles</td></tr>
+          <tr><td>title</td><td>SF Pro · 15/600/−0.2</td><td>Section headers, modal title</td></tr>
+          <tr><td>body</td><td>SF Pro · 12.5/400/0</td><td>UI default, paragraph copy in the app</td></tr>
+          <tr><td>caption</td><td>SF Pro · 10/600/0.6 (UPPER)</td><td>Column heads, eyebrow labels</td></tr>
+          <tr><td>mono · number</td><td>SF Mono · 13/500/0 · tabular</td><td>Table number cells, summary cards</td></tr>
+          <tr><td>mono · sha / axis</td><td>SF Mono · 10–11/500/0.2</td><td>Git SHA, chart axis labels, footer status</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="sys-badges">Badges, flags &amp; treatments</h3>
+      <p>
+        The badge vocabulary is the most-reused atom across the app — every table row, chart header, and
+        sidebar entry pulls from it. To keep them legible at small sizes they are <strong>always set in
+        SF Mono, weight 700, with 0.4–0.6 tracking</strong>, in 3px-rounded chips.
+      </p>
+      <div class="badges">
+        <span class="pill pass">✓ VERIFIED</span>
+        <span class="pill fail">✕ FAILED</span>
+        <span class="pill warn">! UNVERIFIABLE</span>
+        <span class="pill info">⌇ BIMODAL</span>
+        <span class="pill neutral">SINGLE-SHOT</span>
+        <span class="pill neutral">LOOPED</span>
+        <span class="pill warn">⏱ TRUNCATED</span>
+        <span class="pill approx">~ APPROX</span>
+        <span class="pill accent">STANDARD</span>
+      </div>
+
+      <h4>Approximate-math treatment</h4>
+      <p>
+        Fast-math implementations get a stacked treatment, never just one signal:
+      </p>
+      <ul>
+        <li><strong>Hatched fill</strong> in charts (45° lines, 5px pitch) — visually "lighter" than solid bars</li>
+        <li><strong>Dashed 1px border</strong> on bars, points, and pill chips</li>
+        <li><strong>Muted text color</strong> on the row's numbers (<code>text-md</code> not <code>text-hi</code>)</li>
+        <li><strong>~ APPROX pill</strong> in the implementation cell</li>
+      </ul>
+
+      <div class="dodont">
+        <div class="col do">
+          <h5>DO</h5>
+          <ul>
+            <li>Place approximate points beside exact ones on the same axis — comparison <em>visible</em>, just demoted.</li>
+            <li>Show the error tolerance (e.g. <code>ε ≤ 2⁻¹⁵</code>) next to the badge.</li>
+          </ul>
+        </div>
+        <div class="col dont">
+          <h5>DON'T</h5>
+          <ul>
+            <li>Hide approximate rows by default. Users need to see the cost/benefit at a glance.</li>
+            <li>Use color alone for "approximate" — color isn't enough at chart-point sizes.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. IA -->
+    <section id="ia">
+      <div class="eyebrow">03 · Information architecture</div>
+      <h2>Three surfaces, one verb</h2>
+      <p>
+        The app does one thing: <strong>compare runs</strong>. Three surfaces support that verb:
+      </p>
+
+      <div class="frame">
+        <svg viewBox="0 0 720 220" class="glyph">
+          <!-- sidebar -->
+          <rect x="20"  y="20" width="120" height="180" rx="8" stroke="rgba(255,255,255,0.18)"/>
+          <text x="32"  y="38">Run History</text>
+          <line x1="32" y1="50" x2="128" y2="50" stroke="rgba(255,255,255,0.10)"/>
+          <line x1="32" y1="70" x2="100" y2="70"/>
+          <line x1="32" y1="86" x2="118" y2="86"/>
+          <rect x="28" y="98" width="104" height="22" rx="4" fill="rgba(57,196,231,0.10)" stroke="rgba(57,196,231,0.4)"/>
+          <text x="36" y="113" fill="oklch(74% 0.17 198)">selected run</text>
+          <line x1="32" y1="138" x2="120" y2="138"/>
+          <line x1="32" y1="152" x2="110" y2="152"/>
+
+          <!-- detail -->
+          <rect x="160" y="20" width="540" height="180" rx="8" stroke="rgba(255,255,255,0.18)"/>
+          <rect x="170" y="32" width="520" height="36" rx="4" stroke="rgba(255,255,255,0.10)"/>
+          <text x="180" y="55" class="label">Run Summary · hardware · swift · thermal</text>
+          <rect x="170" y="76" width="520" height="116" rx="4" stroke="rgba(255,255,255,0.10)"/>
+          <text x="180" y="92" class="label">Table / Charts toggle</text>
+          <!-- rows -->
+          <line x1="180" y1="108" x2="680" y2="108" stroke="rgba(255,255,255,0.08)"/>
+          <line x1="180" y1="124" x2="680" y2="124" stroke="rgba(255,255,255,0.06)"/>
+          <line x1="180" y1="140" x2="680" y2="140" stroke="rgba(255,255,255,0.06)"/>
+          <line x1="180" y1="156" x2="680" y2="156" stroke="rgba(255,255,255,0.06)"/>
+          <line x1="180" y1="172" x2="680" y2="172" stroke="rgba(255,255,255,0.06)"/>
+          <!-- modal arrow -->
+          <path d="M 440 4 Q 440 -10 460 -10" stroke="rgba(255,255,255,0.20)" fill="none"/>
+          <rect x="220" y="-2" width="260" height="14" rx="3" fill="rgba(57,196,231,0.10)" stroke="rgba(57,196,231,0.4)" class="accent"/>
+          <text x="232" y="9" fill="oklch(74% 0.17 198)">↓ New Run · sheet drops from titlebar</text>
+        </svg>
+        <div class="caption">
+          <strong>Sidebar</strong> is the navigation primitive. <strong>Detail</strong> is the work surface —
+          summary + content (table / charts / diff). <strong>The sheet</strong> is the only modal we use, and
+          only for configuring a new run.
+        </div>
+      </div>
+
+      <p>
+        Comparisons happen by selecting two sidebar rows and entering <strong>Diff mode</strong> via the toolbar
+        — the detail canvas swaps to a delta table with a hard-blocking error state if the two runs come from
+        different hardware fingerprints (see <a class="deep" href="#edges">edge cases</a>).
+      </p>
+    </section>
+
+    <!-- 4. Main window -->
+    <section id="main">
+      <div class="eyebrow">04 · Main window</div>
+      <h2>Run Dashboard</h2>
+      <p>
+        The main window is the app. It loads with the most recent run selected and the data table view active
+        — chart-first feels analytical, but for the day-to-day "did my change regress something?" loop, the
+        table is what eyes go to first.
+      </p>
+
+      <a class="xref" href="VectorSuiteBench.html" target="_blank">
+        <div class="thumb">
+          <svg viewBox="0 0 88 60">
+            <rect x="0.5" y="0.5" width="87" height="59" fill="#15161a" stroke="rgba(255,255,255,0.1)"/>
+            <rect x="4" y="4" width="22" height="52" fill="#1b1c21" stroke="rgba(255,255,255,0.08)"/>
+            <rect x="7" y="10" width="16" height="3" fill="rgba(57,196,231,0.4)"/>
+            <rect x="7" y="16" width="12" height="2" fill="rgba(255,255,255,0.15)"/>
+            <rect x="7" y="21" width="14" height="2" fill="rgba(255,255,255,0.15)"/>
+            <rect x="7" y="26" width="11" height="2" fill="rgba(255,255,255,0.15)"/>
+            <rect x="30" y="4" width="54" height="12" fill="#1b1c21" stroke="rgba(255,255,255,0.08)"/>
+            <rect x="30" y="18" width="54" height="38" fill="#1b1c21" stroke="rgba(255,255,255,0.08)"/>
+            <line x1="32" y1="24" x2="82" y2="24" stroke="rgba(255,255,255,0.1)"/>
+            <line x1="32" y1="30" x2="82" y2="30" stroke="rgba(255,255,255,0.08)"/>
+            <line x1="32" y1="36" x2="82" y2="36" stroke="rgba(255,255,255,0.08)"/>
+            <line x1="32" y1="42" x2="82" y2="42" stroke="rgba(255,255,255,0.08)"/>
+            <line x1="32" y1="48" x2="82" y2="48" stroke="rgba(255,255,255,0.08)"/>
+            <rect x="68" y="26" width="14" height="2" fill="oklch(74% 0.17 198)"/>
+            <rect x="68" y="32" width="10" height="2" fill="rgba(255,255,255,0.3)"/>
+            <rect x="68" y="38" width="12" height="2" fill="oklch(67% 0.20 25 / 0.6)"/>
+          </svg>
+        </div>
+        <div class="body">
+          <div class="eyebrow" style="font-size:9.5px; color: var(--text-lo); margin: 0 0 4px;">02 · ARTBOARD</div>
+          <div class="ttl">Main Window · Run Dashboard · Data Table</div>
+          <div class="meta">1280 × 820 · section <code>main</code> · id <code>main-window</code></div>
+        </div>
+        <div class="arrow">↗</div>
+      </a>
+
+      <h3 id="main-sidebar">Sidebar · Run History</h3>
+      <p>
+        Each row is three lines tall and renders the metadata a perf engineer actually scans for:
+        <strong>time</strong> (relative grouping by day), <strong>preset</strong> as a colored chip,
+        <strong>branch + short SHA</strong> in mono, and a <strong>duration · case count</strong> tail.
+        A warn-colored dot in the row's top-right corner flags runs that experienced thermal throttling — the
+        single most common reason to <em>not</em> trust a run.
+      </p>
+      <div class="dodont">
+        <div class="col do">
+          <h5>DO</h5>
+          <ul>
+            <li>Group rows by relative date — "Today" / "Yesterday" / "May 13".</li>
+            <li>Surface SHA before commit message. Engineers triangulate by SHA, not subject.</li>
+          </ul>
+        </div>
+        <div class="col dont">
+          <h5>DON'T</h5>
+          <ul>
+            <li>Show commit subject lines. They're long and rarely diagnostic.</li>
+            <li>Hide throttle/integrity flags behind a hover. They belong on the row.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 id="main-summary">Run Summary header</h3>
+      <p>
+        A 7-cell info-grid spanning the top of the detail pane. Each cell is one line of label (caption-style),
+        one line of value (mono, tabular), and one line of context (mono, lo-color). Cell borders are 1px hair
+        lines so the grid reads as one structure, not seven cards.
+      </p>
+      <p>
+        When the OS reports a thermal throttle <em>during</em> the run, the grid gets a <strong>warn-tinted
+        banner</strong> above it explaining when and how many events occurred. This is non-dismissable; the
+        signal is too important to be a tooltip.
+      </p>
+
+      <h3 id="main-table">Data Table</h3>
+      <p>
+        Native macOS table semantics — right-aligned numerics, zebra at 2% white, sortable column heads.
+        Column choices and treatments:
+      </p>
+      <table>
+        <thead><tr><th>Column</th><th>Treatment</th></tr></thead>
+        <tbody>
+          <tr><td>Operation</td><td>SF Pro · 600. Mathematical kernel + dtype suffix (<code>dot ƒ32</code>).</td></tr>
+          <tr><td>Implementation</td><td>10×10 swatch + name + (optional) APPROX pill. Hatched swatch &amp; dashed border on approximate variants.</td></tr>
+          <tr><td>Mode · Size</td><td>Capsule (<code>SHOT</code> / <code>LOOP</code>) + mono <code>n=1024</code>.</td></tr>
+          <tr><td>Median ns</td><td>SF Mono · tabular · right-aligned. VectorCore rows: number rendered in <code>--vc</code> at 600.</td></tr>
+          <tr><td>P99 / P999 ns</td><td>Same as median. <strong>No mean column ever</strong>.</td></tr>
+          <tr><td>GFLOP/s · GB/s</td><td>Same numeric system. VectorCore rows colored.</td></tr>
+          <tr><td>Status</td><td>Verification dot + optional flag pill (BIMODAL · TRUNC · APPROX) + optional unit note (<code>ε ≤ 2⁻¹⁵</code>, <code>ulp&gt;1024</code>).</td></tr>
+        </tbody>
+      </table>
+
+      <h4>Row-level integrity treatments</h4>
+      <div class="statusgrid">
+        <div class="label"><span class="pill pass">✓ VERIFIED</span></div>
+        <div class="desc">Normal row. Numbers in <code>text-hi</code>; VectorCore numbers in accent.</div>
+        <div class="label"><span class="pill fail">✕ FAILED</span></div>
+        <div class="desc">All perf cells redacted to <code>—</code> or <code>ERR</code> in <code>--fail</code>. Status cell carries the reason (<code>ulp&gt;1024</code>).</div>
+        <div class="label"><span class="pill warn">! UNVERIFIABLE</span></div>
+        <div class="desc">Numbers shown but in <code>text-md</code>, status flagged. Used for impls that lack a deterministic reference (e.g. Metal MPS).</div>
+        <div class="label"><span class="pill info">⌇ BIMODAL</span></div>
+        <div class="desc">Row gets a faint amber-tinted background; P999 cell colored <code>--warn</code> to draw attention to the tail.</div>
+        <div class="label"><span class="pill warn">⏱ TRUNC</span></div>
+        <div class="desc">P999 cell redacted (test hit timeout before sample). Median/P99 stand.</div>
+        <div class="label"><span class="pill approx" style="border: 1px dashed; color: var(--text-lo); background: transparent;">~ APPROX</span></div>
+        <div class="desc">Row in <code>text-md</code>, swatch hatched, border dashed. Sits below the exact row visually.</div>
+      </div>
+
+      <h4>Toolbar</h4>
+      <p>
+        Standard macOS chrome: <kbd>+ New Run</kbd> (primary), <kbd>⇋ Compare</kbd>, <kbd>↓ Export CSV</kbd>,
+        <kbd>⌖ Calibrate</kbd>. The right side carries a small live-state chip: a green dot when idle, the
+        machine model, and the core count — so an engineer kicking off runs over SSH can see at a glance
+        whether the harness is busy.
+      </p>
+    </section>
+
+    <!-- 5. Modal -->
+    <section id="modal">
+      <div class="eyebrow">05 · New Run modal</div>
+      <h2>Configure benchmark run</h2>
+      <p>
+        A standard macOS sheet, dropped from the window's titlebar. The sheet is dense: five sections stacked
+        vertically with a <strong>180px label gutter on the left</strong> and the form controls on the right.
+        That gutter gives every section a one-line title and a one-line hint without crowding the inputs.
+      </p>
+
+      <a class="xref" href="VectorSuiteBench.html" target="_blank">
+        <div class="thumb">
+          <svg viewBox="0 0 88 60">
+            <rect x="0.5" y="0.5" width="87" height="59" fill="#15161a" opacity="0.6"/>
+            <rect x="10" y="4" width="68" height="52" rx="3" fill="#22232a" stroke="rgba(57,196,231,0.3)"/>
+            <rect x="14" y="8" width="22" height="3" fill="rgba(255,255,255,0.4)"/>
+            <rect x="50" y="8" width="24" height="5" rx="1" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.12)"/>
+            <rect x="57" y="8" width="7" height="5" rx="1" fill="rgba(255,255,255,0.10)"/>
+            <g fill="rgba(57,196,231,0.4)">
+              <rect x="14" y="17" width="12" height="4" rx="1"/>
+              <rect x="28" y="17" width="12" height="4" rx="1"/>
+              <rect x="42" y="17" width="12" height="4" rx="1"/>
+            </g>
+            <rect x="56" y="17" width="12" height="4" rx="1" fill="rgba(255,255,255,0.08)"/>
+            <rect x="14" y="24" width="60" height="5" rx="1" fill="rgba(255,255,255,0.05)"/>
+            <rect x="14" y="32" width="60" height="5" rx="1" fill="rgba(255,255,255,0.05)"/>
+            <rect x="14" y="40" width="60" height="5" rx="1" fill="rgba(255,255,255,0.05)"/>
+            <rect x="10" y="49" width="68" height="7" fill="#1d1e23" stroke="rgba(255,255,255,0.08)"/>
+            <rect x="58" y="51" width="16" height="4" rx="1" fill="oklch(74% 0.17 198)"/>
+          </svg>
+        </div>
+        <div class="body">
+          <div class="eyebrow" style="font-size:9.5px; color: var(--text-lo); margin: 0 0 4px;">03 · ARTBOARD</div>
+          <div class="ttl">New Run · Configure</div>
+          <div class="meta">980 × 720 · section <code>modal</code> · id <code>new-run</code></div>
+        </div>
+        <div class="arrow">↗</div>
+      </a>
+
+      <h4>Preset segmented control</h4>
+      <p>
+        Smoke · Standard · Full · Custom. Selecting a preset pre-fills every section below. Touching any
+        control after that quietly flips the chip to <code>Custom</code> — no modal alert, just a visual cue
+        that the preset has been mutated.
+      </p>
+
+      <h4>Multi-select inputs</h4>
+      <p>
+        Two patterns are used, each tuned to its content:
+      </p>
+      <ul>
+        <li>
+          <strong>Operations</strong> is a 4-column grid of <strong>Checkbox</strong> chips. Each chip carries
+          the operation name and its mathematical shorthand (<code>dot · ∑ aᵢbᵢ</code>). The math glyph is
+          there so people don't have to remember whether "L2" means norm or distance.
+        </li>
+        <li>
+          <strong>Implementations</strong> is a 2-column grid of <strong>ImplChip</strong>s. Each carries the
+          impl's color swatch, library label, and an <code>APPROX</code> pill if it's a fast-math build. The
+          additional density is justified because impls have richer metadata.
+        </li>
+      </ul>
+      <p>
+        Both grids share the same selected-state treatment: 6% cyan fill, 0.5px cyan border, and the checkbox
+        glyph fills with the accent. Unselected chips are 2% white with a hair-line border — quiet by default,
+        so a half-configured run reads as half-configured.
+      </p>
+
+      <h4>Vector Sizes</h4>
+      <p>
+        A horizontally-wrapping <strong>pill grid</strong> at log-spaced powers of 2. Each pill is its own
+        button: tap to toggle. This is the right pattern for a sweep with a fixed candidate set — engineers
+        scan it as "16 to 16M, log-spaced, with 256k–4M turned off". A pair of slider handles would feel
+        clinical but lose the per-size precision.
+      </p>
+
+      <h4>Budgets</h4>
+      <p>
+        A 3×2 grid of native-style select fields. Each has a one-line caption underneath in mono — for the
+        wall-clock estimate, the caption is wired live to the footer so you can see the impact of every
+        toggle. Captions also surface implications a perf engineer cares about: <code>Warm-up — 20 iter ·
+        skip</code> tells them the first 20 iterations don't count.
+      </p>
+
+      <h4>The live-estimate footer</h4>
+      <p>
+        Sticky to the bottom of the sheet. Three numbers in the accent color — <code>~342 cases</code>,
+        <code>~4m 50s</code>, <code>~12 MB JSON</code> — read first; a small breakdown grid on the right
+        explains the math (5 ops × 2 dtypes · 5 impls · 7 sizes · shot + loop). The point is to make the cost
+        of every checkbox click <em>obvious in real time</em>, so engineers don't accidentally kick off the
+        45-minute Full run when they meant Standard.
+      </p>
+      <p>
+        The Start button is the only emphasized primary in the entire sheet: 6% inner highlight + a 35%
+        accent glow. <kbd>⌘↵</kbd> as a hotkey hint is the only mono text in the button.
+      </p>
+    </section>
+
+    <!-- 6. Charts -->
+    <section id="charts">
+      <div class="eyebrow">06 · Chart suite</div>
+      <h2>Five charts, one stance</h2>
+      <p>
+        Every chart in VectorSuiteBench shares the same architecture: a head strip with eyebrow / title /
+        right-aligned pills (mode + flags), a plot region, and a foot strip with the key statistic readout. A
+        sidebar legend sits inside the plot region rather than below it — at 1280px the layout already runs
+        right-edge, so vertical real estate is the scarce resource.
+      </p>
+      <p>The five charts mandated by the spec:</p>
+      <table>
+        <thead><tr><th>Chart</th><th>Axes</th><th>Distinguishing element</th></tr></thead>
+        <tbody>
+          <tr><td>Throughput bars</td><td>op · GFLOP/s or GB/s</td><td>Grouped by impl. Hatched fills on approximate variants.</td></tr>
+          <tr><td>Latency histogram</td><td>ns (log) · count</td><td>P50/P99/P999 rule-lines. Bimodal flag.</td></tr>
+          <tr><td>Percentile line chart</td><td>vector size (log) · ns (log)</td><td>Median + P99 lines scale together.</td></tr>
+          <tr><td>Roofline scatter</td><td>FLOPS/byte (log) · GFLOP/s (log)</td><td>Compute &amp; bandwidth ceiling lines.</td></tr>
+          <tr><td>Memory pressure</td><td>wall time · RSS (MB)</td><td>Annotation bands at thermal events.</td></tr>
+        </tbody>
+      </table>
+      <p>This document explores the two most technically risky: Roofline and Latency Histogram.</p>
+
+      <h3 id="chart-roofline">Roofline scatter</h3>
+      <a class="xref" href="VectorSuiteBench.html" target="_blank">
+        <div class="thumb">
+          <svg viewBox="0 0 88 60">
+            <rect x="0.5" y="0.5" width="87" height="59" fill="#15161a" stroke="rgba(255,255,255,0.1)"/>
+            <rect x="6" y="4" width="76" height="7" fill="#1d1e23" stroke="rgba(255,255,255,0.08)"/>
+            <rect x="10" y="15" width="55" height="40" fill="rgba(255,255,255,0.02)"/>
+            <line x1="10" y1="22" x2="65" y2="22" stroke="oklch(74% 0.17 198)" stroke-width="1.2"/>
+            <line x1="10" y1="50" x2="40" y2="22" stroke="oklch(74% 0.17 198)" stroke-width="1.2"/>
+            <circle cx="22" cy="42" r="1.5" fill="oklch(74% 0.17 198)"/>
+            <circle cx="30" cy="36" r="1.5" fill="oklch(74% 0.17 198)"/>
+            <circle cx="42" cy="28" r="1.5" fill="oklch(74% 0.17 198)"/>
+            <circle cx="55" cy="23" r="1.5" fill="oklch(74% 0.17 198)"/>
+            <circle cx="22" cy="45" r="1.5" fill="oklch(68% 0.04 50)"/>
+            <circle cx="32" cy="40" r="1.5" fill="oklch(68% 0.04 50)"/>
+            <circle cx="30" cy="38" r="1.5" fill="none" stroke="oklch(74% 0.17 198)" stroke-dasharray="1.5 1"/>
+            <rect x="68" y="15" width="14" height="40" fill="#1b1c21" stroke="rgba(255,255,255,0.05)"/>
+            <line x1="70" y1="19" x2="80" y2="19" stroke="rgba(255,255,255,0.4)" stroke-width="0.5"/>
+            <line x1="70" y1="23" x2="80" y2="23" stroke="rgba(255,255,255,0.4)" stroke-width="0.5"/>
+            <line x1="70" y1="27" x2="80" y2="27" stroke="rgba(255,255,255,0.4)" stroke-width="0.5"/>
+            <line x1="70" y1="31" x2="80" y2="31" stroke="rgba(255,255,255,0.4)" stroke-width="0.5"/>
+          </svg>
+        </div>
+        <div class="body">
+          <div class="eyebrow" style="font-size:9.5px; color: var(--text-lo); margin: 0 0 4px;">04 · ARTBOARD</div>
+          <div class="ttl">Roofline · Compute vs Bandwidth ceiling</div>
+          <div class="meta">820 × 560 · section <code>charts</code> · id <code>roofline</code></div>
+        </div>
+        <div class="arrow">↗</div>
+      </a>
+      <p>
+        The roofline plot is the most information-dense chart in the suite. It is also the one where
+        "approximate math hatches" and "bimodal warnings" are most likely to make the picture unreadable. The
+        approach:
+      </p>
+      <ul>
+        <li><strong>Ceilings are the chart's primary structure.</strong> The two rooflines (peak compute,
+            peak bandwidth) are 2.2px solid in <code>--vc</code> — they earn the only saturated stroke in the
+            plot. A 4% accent fill below them creates a subtle "feasible region" floor.</li>
+        <li><strong>Solid points = exact math. Dashed-stroke open rings with a slash = approximate.</strong>
+            The ring + slash is more legible at scatter sizes than a hatched fill.</li>
+        <li><strong>Annotation boxes anchor the lesson.</strong> One target callout ("VectorCore axpy ƒ16 ·
+            400 GFLOP/s · 98% peak") tells the engineer what to take away — the chart is not just a plot, it
+            argues a point.</li>
+        <li><strong>Balance line.</strong> A faint dashed vertical at <code>AI ≈ 10</code> marks where
+            kernels stop being memory-bound. Without this the diagonal looks decorative.</li>
+      </ul>
+
+      <h3 id="chart-histogram">Latency histogram</h3>
+      <a class="xref" href="VectorSuiteBench.html" target="_blank">
+        <div class="thumb">
+          <svg viewBox="0 0 88 60">
+            <rect x="0.5" y="0.5" width="87" height="59" fill="#15161a" stroke="rgba(255,255,255,0.1)"/>
+            <rect x="6" y="4" width="76" height="7" fill="#1d1e23" stroke="rgba(255,255,255,0.08)"/>
+            <rect x="10" y="15" width="55" height="40" fill="rgba(255,255,255,0.02)"/>
+            <g fill="oklch(74% 0.17 198)">
+              <rect x="12" y="48" width="2" height="7"/>
+              <rect x="15" y="42" width="2" height="13"/>
+              <rect x="18" y="34" width="2" height="21"/>
+              <rect x="21" y="26" width="2" height="29"/>
+              <rect x="24" y="30" width="2" height="25"/>
+              <rect x="27" y="38" width="2" height="17"/>
+              <rect x="30" y="45" width="2" height="10"/>
+            </g>
+            <g stroke="oklch(74% 0.17 198)" fill="none" stroke-width="0.8">
+              <rect x="35" y="43" width="2" height="12" stroke-dasharray="1 1"/>
+              <rect x="38" y="38" width="2" height="17" stroke-dasharray="1 1"/>
+              <rect x="41" y="34" width="2" height="21" stroke-dasharray="1 1"/>
+              <rect x="44" y="37" width="2" height="18" stroke-dasharray="1 1"/>
+              <rect x="47" y="45" width="2" height="10" stroke-dasharray="1 1"/>
+            </g>
+            <g fill="oklch(80% 0.15 80)">
+              <rect x="54" y="51" width="2" height="4"/>
+              <rect x="57" y="52" width="2" height="3"/>
+              <rect x="60" y="53" width="2" height="2"/>
+            </g>
+            <line x1="22" y1="15" x2="22" y2="55" stroke="rgba(255,255,255,0.6)" stroke-dasharray="1.5 1.5" stroke-width="0.7"/>
+            <line x1="52" y1="15" x2="52" y2="55" stroke="oklch(80% 0.15 80)" stroke-dasharray="1.5 1.5" stroke-width="0.7"/>
+            <line x1="62" y1="15" x2="62" y2="55" stroke="oklch(67% 0.20 25)" stroke-dasharray="1.5 1.5" stroke-width="0.7"/>
+            <rect x="68" y="15" width="14" height="40" fill="#1b1c21" stroke="rgba(255,255,255,0.05)"/>
+          </svg>
+        </div>
+        <div class="body">
+          <div class="eyebrow" style="font-size:9.5px; color: var(--text-lo); margin: 0 0 4px;">04 · ARTBOARD</div>
+          <div class="ttl">Latency Histogram · Bimodal</div>
+          <div class="meta">820 × 560 · section <code>charts</code> · id <code>histogram</code></div>
+        </div>
+        <div class="arrow">↗</div>
+      </a>
+      <p>
+        The histogram makes the most of its color budget by varying treatment, not hue:
+      </p>
+      <ul>
+        <li><strong>Bins are all the same cyan.</strong> The right-tail bins (past P99) get a warn fill so
+            the tail itself is visible without an annotation pointing at it.</li>
+        <li><strong>Hatched bars in the second mode.</strong> When the scheduler migrated to an E-core mid-run,
+            the second hump renders as hatched bars rather than a different color. The reader sees "two
+            modes" and the hatch tells them "this is the migration".</li>
+        <li><strong>Top brackets.</strong> Square brackets at the chart's top label each mode with a hit
+            count. This is a quieter, more accurate replacement for chart-area annotation lines.</li>
+        <li><strong>Three dashed rule-lines</strong> for P50 / P99 / P999 in <code>text-hi / warn / fail</code>,
+            with anchored mini-tags in the upper-right of the plot. The tag chip's stroke matches the line
+            color so they're locked together visually.</li>
+        <li><strong>The BIMODAL pill drives an inline explainer.</strong> The legend includes a short prose
+            note that names the root cause ("scheduler migrated to E-core, 60/200") and suggests the fix
+            ("pin to P-cores"). Charts that diagnose are more useful than charts that describe.</li>
+        <li><strong>Mode pill</strong> in the header (<code>SINGLE-SHOT</code>) is required — the same data
+            in <code>LOOPED</code> mode would have a wildly different distribution and reader needs to know
+            which it is before reading anything else.</li>
+      </ul>
+    </section>
+
+    <!-- 7. Edge cases -->
+    <section id="edges">
+      <div class="eyebrow">07 · Edge cases</div>
+      <h2>States we have to get right</h2>
+
+      <h4>Cross-hardware diff (blocked)</h4>
+      <p>
+        Diffing an M1 run against an M3 run is meaningless. The Diff pane refuses with a full-bleed blocking
+        state and explicit copy: "Cross-hardware comparisons are disabled to prevent misleading data." A
+        secondary affordance offers to filter the sidebar to runs on the matching fingerprint.
+      </p>
+
+      <h4>Empty state · first launch</h4>
+      <p>
+        Before any chart can render meaningfully, we need to know what the user's machine is actually capable
+        of. The main canvas shows a centered <code>cpu.mac</code> hero icon, "Hardware Calibration Required",
+        and a primary <kbd>Measure Peaks (~30s)</kbd> button. While running, a terminal-style status feed
+        (mono, <code>text-md</code>) renders below a small circular spinner.
+      </p>
+
+      <h4>Failed verification</h4>
+      <p>
+        Every perf cell in the row redacts to <code>—</code>; GFLOP/s and GB/s become <code>ERR</code> in
+        <code>--fail</code>. The row's Operation cell remains in <code>text-hi</code> so the row is still
+        findable in a scan. Status shows the reason (<code>ulp&gt;1024</code>, <code>nan</code>, etc.).
+      </p>
+
+      <h4>Thermal throttle during run</h4>
+      <p>
+        Warning banner above the Run Summary header (covered above). The Cases summary cell tightens to
+        <code>342/342 · 0 failed · 4 ⚠</code>. Throttled cases stay in the table but their rows get a faint
+        amber-tinted background.
+      </p>
+
+      <h4>Run still in progress</h4>
+      <p>
+        The selected row in the sidebar shows a small spinning dot in the throttle slot. The detail pane
+        renders rows as they stream in, with an <code>⋯</code> trailing pill in the implementation cell of
+        the in-flight case. Cancel lives in the toolbar.
+      </p>
+    </section>
+
+    <!-- 8. Open questions -->
+    <section id="open">
+      <div class="eyebrow">08 · Open questions</div>
+      <h2>For your review</h2>
+      <ol>
+        <li>
+          <strong>Sidebar density.</strong> The current row is three lines, ~62px tall. With heavy users
+          running 50+ benchmarks/day, do we want a "compact" toggle that drops to a one-line variant (time +
+          SHA + status)?
+        </li>
+        <li>
+          <strong>Mode pill location.</strong> Right now <code>SHOT</code> / <code>LOOP</code> lives inside
+          the Mode column of the table. Alternative: make Mode a filter at the top and never repeat it in
+          rows — would simplify cells but lose at-a-glance scannability when mixed-mode tables are exported.
+        </li>
+        <li>
+          <strong>Approximate-math placement.</strong> Should fast-math rows sit interleaved with their exact
+          counterpart (current) or grouped at the bottom of each operation block?
+        </li>
+        <li>
+          <strong>Diff visual.</strong> Side-by-side or merged delta table? The delta-table prototype reads
+          tighter but it's harder to spot a column where target is <em>missing</em> a verification baseline
+          has.
+        </li>
+        <li>
+          <strong>Hardware fingerprint detail.</strong> Currently a single string ("M3 Max · 14C / 30G").
+          Worth expanding to a popover with full chip details (cluster sizes, base/boost clocks, memory
+          channels)?
+        </li>
+        <li>
+          <strong>Color-blind paths.</strong> The current diff coloring relies on hue. Should we layer
+          icons on the delta column (▼ / ▲) or only on opt-in?
+        </li>
+      </ol>
+    </section>
+  </main>
+</div>
+
+<footer>
+  <span>VectorSuiteBench · Design Doc v0.1</span>
+  <span>tokens · main · modal · charts · edges</span>
+  <span><a class="deep" href="VectorSuiteBench.html" style="color: var(--vc); border-bottom: 1px dashed rgba(57,196,231,0.5);">↗ open design file</a></span>
+</footer>
+
+</body>
+</html>
