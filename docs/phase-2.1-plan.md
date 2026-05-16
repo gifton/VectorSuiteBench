@@ -72,18 +72,65 @@ The user's external design agent is producing SwiftUI components alongside this 
 
 ---
 
-## 2. Phase 2.1 scope — five UI items
+## 2. Phase 2.1 scope — sequenced items
 
-### Item 1 — Xcode app target wiring + RunStore plumbing
+The original plan listed five items. After the design doc landed, two of those (Item 1 wiring; Item 3 detail surface) are too coarse — the detail surface alone needs four sub-deliverables, and the app target's current state needs explicit cleanup before any new code lands. The revised breakdown is **eight items**, sequenced for incremental on-screen progress (see §2.5 Build order).
 
-The app target needs to depend on the three packages. Inside Xcode this is "Add Package Dependency → Add Local…" pointing at `Packages/BenchKit`, `Packages/VSBCore`, `Packages/VSBRun` (the last for `RunPreset` parity with the CLI). Then add an `@StateObject RunStoreCoordinator` (or actor-equivalent) that loads `RunStore.defaultStore()` once and exposes the loaded `RunIndex` + per-run `RunDocument` to views.
+### Item 0 — Design system primitives (cross-cutting)
 
-Acceptance: a smoke test `swift run vsb-run --preset smoke --skip-peaks` followed by launching the app shows the run in the sidebar.
+Before any view: build the design tokens and atomic components that every other item reuses. Skipping this means re-deriving cyan in five places and getting the `tabular-nums` modifier wrong on row 47.
+
+**Tokens** (`VectorSuiteBench/Design/Tokens.swift`): `Color` extensions for `bg / surface0 / surface1 / surface2 / surface3 / hair / hair2 / divider`, `text.hi / md / lo / dim`, `impl.vectorCore / vDSP / accelerate / metal / naive`, `status.pass / fail / warn / info`. All `Color` values use OKLCH-equivalent RGB triplets from the design doc. The impl tokens drive both swatches and chart series colors.
+
+**Typography** (`VectorSuiteBench/Design/Typography.swift`): `display / title / body / caption` (SF Pro Text variants) and `mono.number / mono.shaAxis` (SF Mono with `.monospacedDigit()` AND `tabular-nums` font feature). Every number cell in the app must use `mono.number` — no exceptions.
+
+**Components** (`VectorSuiteBench/Components/Design/`):
+- `Pill.swift` — 8 variants: `pass / fail / warn / info / neutral / approx / accent / mode`. All use SF Mono 700 with 0.4–0.6 tracking, 3 px rounded chip, matched chroma. `approx` is the dashed-border variant.
+- `ImplSwatch.swift` — 10 × 10 color square keyed by `ImplKind`. Accepts an `isApproximate: Bool` modifier that switches to hatched fill (`Canvas` with 45° diagonal lines at 5 px pitch).
+- `NumberCell.swift` — Right-aligned mono number with optional accent treatment for VectorCore rows. Handles nil → `—`, failed → `ERR` (in `--fail`).
+- `DeltaGlyph.swift` — `▼` / `▲` + signed percentage + colored text. Polarity-aware: pass a `LowerIsBetter | HigherIsBetter` enum so the same `-12 %` reads green for latency and red for throughput (locked decision §1.5/6).
+- `VerificationDot.swift` — small colored dot keyed by `VerificationResult`.
+- `HatchedFillModifier.swift` — `ViewModifier` that overlays the diagonal-line pattern; used by `ImplSwatch` and by `ThroughputBarChart` bar marks for approximate rows.
+
+**Tests:** none for view atoms (SwiftUI Previews carry the visual review). One unit test that `DeltaGlyph` flips polarity correctly given the `LowerIsBetter` enum — that's the only piece with real logic.
 
 **Files:**
-- `VectorSuiteBench/VectorSuiteBench.xcodeproj` (Xcode project edit — add package refs).
-- `VectorSuiteBench/Models/RunStoreCoordinator.swift` (new) — `@Observable` wrapper around `RunStore`.
-- `VectorSuiteBench/App.swift` (replace template body).
+- `VectorSuiteBench/Design/Tokens.swift`
+- `VectorSuiteBench/Design/Typography.swift`
+- `VectorSuiteBench/Components/Design/{Pill, ImplSwatch, NumberCell, DeltaGlyph, VerificationDot, HatchedFillModifier}.swift`
+- `VectorSuiteBenchTests/DeltaGlyphTests.swift`
+
+---
+
+### Item 1 — Xcode app target + data spine
+
+Item 1 has three sub-deliverables. The app target today is the literal macOS SwiftData template (`Item.swift`, default `ContentView`, `sharedModelContainer`) — it has to be stripped before real code lands.
+
+**1a. Strip the template.** Remove `Item.swift`, the `ModelContainer` setup, and the default `ContentView` body. `VectorSuiteBenchApp` becomes a thin `WindowGroup { AppRoot() }`. Remove the SwiftData / Item references from `VectorSuiteBenchTests/VectorSuiteBenchTests.swift`.
+
+**1b. Add SwiftPM dependencies.** The app target needs to depend on `Packages/BenchKit`, `Packages/VSBCore`, and `Packages/VSBRun` (for `RunPreset` and the `PresetArg` enum if we choose to share it). **Decision required:** these edits live in `VectorSuiteBench.xcodeproj/project.pbxproj`. Two paths:
+  - **(A) User adds the package refs in Xcode** — File → Add Package Dependencies → Add Local… × 3. 60 seconds, no pbxproj risk.
+  - **(B) Agent edits `project.pbxproj` directly** — the format is text but finicky (XCSwiftPackageProductDependency + XCLocalSwiftPackageReference + target frameworks build phase). Possible but the pbxproj has more invariants than a hand-edit guarantees.
+
+Recommend (A) — explicit hand-off; the plan flags this is the one place a fresh agent must pause for user action.
+
+**1c. Data spine** (`VectorSuiteBench/Models/`):
+- `RunStoreCoordinator.swift` — `@Observable` actor-equivalent. Loads `RunStore.defaultStore()` once. Publishes `var index: RunIndex` and a `func run(for: String) async throws -> RunDocument` cache. Watches `index.json` for changes (FSEvents or simple poll-on-foreground) so a CLI run while the app is open reflects within a second.
+- `RunProgress.swift` — `@Observable` progress tracker, instantiated when a run starts. Polls `runs/<runID>/cases/` for new JSON files at 500 ms cadence; exposes `completedCount`, `totalCount`, `currentCase: WorkloadID?`. Stops on `finalizeRun`.
+- `AppRoot.swift` — top-level `NavigationSplitView` with placeholder Sidebar / Detail pending Items 2 and 3.
+
+**Tests:**
+- `RunStoreCoordinatorTests` — populate a temp store with 3 runs via `RunStore.beginRun + writeCase + finalizeRun`, point the coordinator at it, verify `index` reflects all 3 with correct ordering (newest first).
+- `RunProgressTests` — fake run dir with case files appearing over time; verify `completedCount` updates.
+
+**Files:**
+- `VectorSuiteBench/VectorSuiteBenchApp.swift` (rewrite — drop SwiftData).
+- `VectorSuiteBench/AppRoot.swift` (new).
+- `VectorSuiteBench/Models/RunStoreCoordinator.swift` (new).
+- `VectorSuiteBench/Models/RunProgress.swift` (new).
+- `VectorSuiteBench/Item.swift` → **delete**.
+- `VectorSuiteBench/ContentView.swift` → **delete**.
+- `VectorSuiteBenchTests/{RunStoreCoordinatorTests, RunProgressTests}.swift`.
 
 ### Item 2 — `RunListSidebar`
 
@@ -106,7 +153,10 @@ Acceptance: a smoke test `swift run vsb-run --preset smoke --skip-peaks` followe
 **Files:**
 - `VectorSuiteBench/Views/RunListSidebar.swift`.
 
-### Item 3 — `RunDetailView` (7-cell summary header + Table/Charts toggle)
+### Item 3 — Run Detail surface (broken into 4 sub-items)
+
+The detail surface is the work surface. It's the biggest item by far — 4 sub-deliverables that build on each other (3a → 3b → 3c → 3d).
+
 
 The work surface. Three regions, top to bottom:
 
@@ -151,13 +201,37 @@ Row-level integrity treatments (all from design doc §4 "Row-level integrity tre
 
 `ThroughputBarChart`: X = op, Y = GFLOP/s (or GB/s via toggle), grouped by impl. **Mode pill always visible in the chart header** (per §1.5/2 — mode is sacred). `.approximate` impls render with hatched fill (45° lines, 5 px pitch) + dashed 1 px border. VectorCore bars are the only saturated cyan; vDSP/Accelerate/simd/naïve are hue-varying graphites at chroma 0.04. Op / impl filter pickers above the chart share state with the table's filter — one filter, two consumers.
 
+**Sub-items (build in order — 3a is the shell, 3b–3d slot into it):**
+
+**3a. Summary header + thermal banner + detail shell.**
+- `RunDetailView` — the container. Reads `selectedRunID` from `AppRoot`; loads the `RunDocument` via `RunStoreCoordinator`; renders `RunSummaryHeader` + a `Table ⟷ Charts` segmented control + a placeholder body.
+- `RunSummaryHeader` — the 7-cell grid + thermal banner.
+- `HardwareFingerprintPopover` — `NSPopover`-backed content for click-to-expand hardware details (locked decision §1.5/5).
+- **Tests:** `RunSummaryHeader` preview-only. `HardwareFingerprintPopover` data-formatter tests (chip name → display string).
+
+**3b. Data table.**
+- `CaseTable.swift` — 8 columns, 6 row treatments per the manifest above.
+- `CaseTableFilter` — `@Observable` filter model with op + impl + verification-status + mode pickers. Will be shared with 3c.
+- **Tests:** `CaseTableFilterTests` — apply each filter axis to a sample registry, verify the resulting case list. View tests are SwiftUI Previews.
+
+**3c. ThroughputBarChart + Table ⟷ Charts toggle wiring.**
+- `ThroughputBarChart.swift` — Swift Charts `BarMark` grouped by op, colored by impl. Approximate impls use `.foregroundStyle` overrides + hatched fill modifier (Item 0).
+- Wire the segmented toggle in `RunDetailView` so it switches the body between `CaseTable` and `ThroughputBarChart`. Both views observe the same `CaseTableFilter` instance.
+- Placeholder views for the other 4 chart slots (rendered as "Coming in 2.3" cards inside the chart picker).
+- **Tests:** `ThroughputBarChartDataTests` — feed the chart data builder a synthetic `RunDocument` and verify the resulting `[ChartSeries]` shape (groups, colors, hatched flags).
+
+**3d. Diff toolbar placeholder.**
+- Add the `⇋ Compare` button to the toolbar but mark it disabled with a "Coming in 2.2" tooltip. Reserves the chrome real estate per the design doc so 2.2 lands without re-shuffling.
+
 **Files:**
-- `VectorSuiteBench/Views/RunDetailView.swift`.
-- `VectorSuiteBench/Views/RunSummaryHeader.swift`.
-- `VectorSuiteBench/Views/HardwareFingerprintPopover.swift`.
-- `VectorSuiteBench/Views/CaseTable.swift`.
-- `VectorSuiteBench/Charts/ThroughputBarChart.swift`.
-- `VectorSuiteBench/Design/Tokens.swift` — color tokens + typography styles per design doc §02.
+- `VectorSuiteBench/Views/RunDetailView.swift`
+- `VectorSuiteBench/Views/RunSummaryHeader.swift`
+- `VectorSuiteBench/Views/HardwareFingerprintPopover.swift`
+- `VectorSuiteBench/Views/CaseTable.swift`
+- `VectorSuiteBench/Models/CaseTableFilter.swift`
+- `VectorSuiteBench/Charts/ThroughputBarChart.swift`
+- `VectorSuiteBench/Charts/ChartDataBuilder.swift`
+- `VectorSuiteBenchTests/{CaseTableFilterTests, ChartDataBuilderTests, HardwareFingerprintFormatterTests}.swift`
 
 ### Item 4 — `RunConfigView` (New Run modal sheet)
 
@@ -179,12 +253,26 @@ Standard macOS sheet, **980 × 720**, dropped from the window titlebar. Five sec
 
 **Wiring.** Start invokes `RunController` in-process with `measurePeaks: true` (unless `peaks/<hardware.fingerprint>.json` already exists). Progress reflected by `@Observable RunProgress` that watches the run dir + drives the "in-flight" row treatment in the data table (Item 3). Cancel button on the toolbar uses the `CancellationToken` path validated in Phase 2.0 — a cancelled run produces a *valid* partial RunDocument.
 
+**Sub-items (build in order):**
+
+**4a. Static modal shell.** All 5 sections rendered with placeholder selected state. No live computation. Verifies the layout dimensions + 180 px gutter + section ordering. Gets the design pixel-perfect before logic.
+
+**4b. Live-estimate footer.** Compute the `(cases, wall, bytes)` triple from the current selection. Cases = Cartesian product of op × impl × size × mode. Wall = sum of per-case estimates (use a simple lookup table seeded from Phase 2.0 smoke-run timings; refine in later phases). Bytes = `cases × averageBytesPerCase` (~32 KB based on Phase 2.0 measured JSON sizes). Wire it to recompute on every toggle.
+- **Tests:** `RunConfigEstimatorTests` — given a selection, expect the triple. The wall estimate is allowed to be ±50 % rough; cases must be exact.
+
+**4c. RunController invocation + progress wiring + cancellation.**
+- Start button → spawn a detached `Task` that calls `RunController(registry: filteredRegistry, store: store, preset: preset, cancellation: token).run()`.
+- A `RunProgress` instance (Item 1c) gets created and passed to `AppRoot` so the sidebar can show the in-flight row treatment and the detail table can show streaming rows.
+- Cancel button on the toolbar → `token.cancel()`. The CLI's SIGINT handler validated this path in 2.0; the in-process equivalent is direct.
+- **Tests:** an integration test that spawns RunController against a single-case registry through the UI's start path (not the CLI's) and verifies the same RunDocument shape. Mirrors `RunControllerIntegrationTests` but exercises the UI's wiring.
+
 **Files:**
-- `VectorSuiteBench/Views/RunConfigView.swift`.
-- `VectorSuiteBench/Views/ImplChip.swift`.
-- `VectorSuiteBench/Views/PresetSegmentedControl.swift`.
-- `VectorSuiteBench/Views/LiveEstimateFooter.swift`.
-- `VectorSuiteBench/Models/RunProgress.swift` — `@Observable` progress tracker that watches the run dir.
+- `VectorSuiteBench/Views/RunConfigView.swift`
+- `VectorSuiteBench/Views/ImplChip.swift`
+- `VectorSuiteBench/Views/PresetSegmentedControl.swift`
+- `VectorSuiteBench/Views/LiveEstimateFooter.swift`
+- `VectorSuiteBench/Models/RunConfigEstimator.swift`
+- `VectorSuiteBenchTests/RunConfigEstimatorTests.swift`
 
 ### Item 5 — First-launch / hardware-calibration flow
 
@@ -201,6 +289,54 @@ Re-prompts whenever `HardwareInventory.probe().fingerprint` changes (new Mac, du
 **Files:**
 - `VectorSuiteBench/Views/FirstLaunchView.swift`.
 - `VectorSuiteBench/Views/CalibrationStatusFeed.swift`.
+
+---
+
+## 2.5 Build order + visible milestones
+
+The items above can ship in this sequence. Each step ends in something visibly different in the running app — easier to course-correct + easier to demo.
+
+| # | Step | What's visible after |
+|---|------|----------------------|
+| 1 | Item 0 — design system primitives | Nothing in the app yet, but all SwiftUI Previews of the atoms (Pill / ImplSwatch / NumberCell / DeltaGlyph / VerificationDot) render. |
+| 2 | Item 1a — strip SwiftData template | App builds and launches; window is empty. (Sanity gate before we add anything.) |
+| 3 | Item 1b — **PAUSE: user adds package deps in Xcode** | App can `import BenchKit` / `import VSBCore` / `import VSBRun`. |
+| 4 | Item 1c — data spine + `AppRoot` shell | App launches into a `NavigationSplitView` with empty Sidebar and Detail. `RunStoreCoordinator` loads `~/Library/Application Support/VectorSuiteBench/` if present. |
+| 5 | Item 5 — first-launch / calibration | App on a fresh machine (no `peaks/<fp>.json`) shows the hardware-calibration empty state with a `⌖ Measure Peaks` button that runs. |
+| 6 | Item 2 — `RunListSidebar` | Sidebar populates with any runs from previous CLI smoke runs (`swift run vsb-run --preset smoke`). Selecting a row is wired but the Detail still says "Select a run". |
+| 7 | Item 3a — summary header + thermal banner + shell | Selecting a run shows the 7-cell header, with `NSPopover` working for the hardware cell. Body says "Coming next". |
+| 8 | Item 3b — `CaseTable` | Selecting a run shows the full data table with all 8 columns and the 6 row treatments. **First moment the app is materially useful.** |
+| 9 | Item 3c — `ThroughputBarChart` + Table↔Charts toggle | Toggling switches the body. Chart honors the shared filter state. Other 4 chart slots render placeholders. |
+| 10 | Item 3d — diff toolbar placeholder | `⇋ Compare` button reserved in the toolbar (disabled). |
+| 11 | Item 4a — modal shell | `+ New Run` opens the empty 5-section sheet. Nothing wired yet. |
+| 12 | Item 4b — live estimate | Toggling controls updates the `~342 cases · ~4m 50s · ~12 MB` footer in real time. |
+| 13 | Item 4c — RunController invocation | Start runs an in-process benchmark; rows stream into the Detail table during the run; Cancel works. **Phase 2.1 complete.** |
+
+Estimated work: 6–9 focused sessions. Item 0 is small; Item 1c + Item 3b are the biggest chunks; Item 4c is the most error-prone (in-process orchestration + observable wiring + Task lifecycle).
+
+If a session has to skip ahead, the dependencies are: Item 0 unblocks everything; Item 1b unblocks everything else; Item 3b can't ship before Item 3a; Item 4c can't ship before Item 1c. Items 2, 3a, 3c, 5 are independent of each other once their predecessors land.
+
+---
+
+## 2.6 Test strategy
+
+Phase 2.1 ships ~15–20 new tests against the 87-test baseline (target ~105 total). UI is mostly visually reviewed via SwiftUI Previews; model + formatter + chart-data logic gets coverage.
+
+**What gets tested:**
+
+- `DeltaGlyphTests` — polarity flip works.
+- `RunStoreCoordinatorTests` — temp store with 3 runs, verify index loads + ordering + per-run cache.
+- `RunProgressTests` — fake run dir with case files appearing over time, verify counts update.
+- `HardwareFingerprintFormatterTests` — chip string + core counts → display strings the popover renders.
+- `CaseTableFilterTests` — each filter axis (op / impl / verification / mode) applied to a synthetic registry returns the expected case set.
+- `ChartDataBuilderTests` — synthetic `RunDocument` → `[ChartSeries]` shape (groups, colors, hatched flags for approximate, mode pill data).
+- `RunConfigEstimatorTests` — selection → `(cases, wall, bytes)` triple; cases exact, wall ±50 %.
+- `RunControllerUIIntegrationTests` — start path through the UI invokes `RunController` and produces the same `RunDocument` shape as `RunControllerIntegrationTests` did in Phase 2.0 (via the CLI).
+
+**What's NOT tested:**
+
+- SwiftUI views themselves — visual review via Previews + manual smoke. Snapshot tests are out of scope for 2.1; revisit if Phase 2.2 finds a stable shape.
+- Cross-process e2e (launch the `.app` binary from a test) — too brittle for 2.1; the CLI's e2e tests cover the harness path.
 
 ---
 
@@ -252,7 +388,7 @@ open VectorSuiteBench/VectorSuiteBench.xcodeproj
 # Run the app; verify the run shows in sidebar, detail view renders chart + table.
 ```
 
-Expected test count at 2.1 close: ~95 (87 carried + ~8 new for the `RunStoreCoordinator` + `RunProgress` observable wrappers + chart formatting helpers; the SwiftUI views themselves are mostly tested by eye).
+Expected test count at 2.1 close: **~105** (87 carried + ~18 new). The new tests are listed in §2.6 — primarily models / formatters / chart-data builders; SwiftUI views themselves are reviewed via Previews + manual smoke, not snapshot-tested.
 
 ---
 
@@ -304,18 +440,18 @@ The design doc specs the full chart suite + diff mode; that breadth is the *visu
 
 ## 7. How to start
 
-1. Read `docs/phase-2.0-plan.md` §8 (state at end of 2.0) — confirms what's on disk.
-2. Read this doc.
+1. Read `docs/design/phase-2.1-design.html` — the visual source of truth. Then read this doc (you're here).
+2. Read `docs/phase-2.0-plan.md` §8 — confirms what's on disk and what tools exist.
 3. `cd Packages/BenchKit && swift test` — confirm 67 pass. Repeat for VSBCore (17) and VSBRun (3).
-4. Run the CLI once to populate `~/Library/Application Support/VectorSuiteBench/`:
+4. Run the CLI once to populate the run store with smoke data:
    `swift run --package-path Packages/VSBRun vsb-run --preset smoke --skip-peaks --filter dot --filter naive`
-5. Open `VectorSuiteBench/VectorSuiteBench.xcodeproj`. Add local-package dependencies (Item 1).
-6. Implement Items 1 → 2 → 3 → 4 → 5 in that order. Items 1 and 5 are bookends; 2/3/4 are the body. Commit each.
-7. Push to `main`. Update §8 of this doc with the commit list + final test count.
+5. **Implement in the order in §2.5.** Highlights:
+   - Item 0 (design system) is the foundation — every later item references it.
+   - At step 3 of the build order you **pause for the user** to add the three local SwiftPM dependencies in Xcode (File → Add Package Dependencies → Add Local… → BenchKit / VSBCore / VSBRun). Do not edit `project.pbxproj` directly.
+   - Commit each sub-item as it lands; don't accumulate multi-item commits.
+6. Push to `main` as you go. Update §8 of this doc with the commit list + final test count when 2.1 closes.
 
-Estimated work: 4–6 focused sessions. Item 3 is the largest (chart + case table + filter wiring); Items 1, 2, and 5 are mostly plumbing; Item 4 is medium (RunController integration + progress observation).
-
-If anything reads ambiguous, **stop and ask before guessing.**
+If anything reads ambiguous, **stop and ask before guessing.** The §1.5 locked decisions are *not* ambiguous — they're locked. Everything else is fair game to surface.
 
 ---
 
