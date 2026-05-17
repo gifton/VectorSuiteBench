@@ -14,11 +14,12 @@ phase is now UI implementation against a locked design doc.
 
 - Repo: /Users/goftin/dev/gsuite/VectorSuiteBench · main · push authorized
 - GitHub: gifton/VectorSuiteBench
-- Last commit (after Item 2): see `git log -1 --oneline`
-- Tests: ~125 total. ~36 in the Xcode app target (DeltaGlyphTests,
+- Last commit (after Item 5): see `git log -1 --oneline`
+- Tests: ~134 total. ~42 in the Xcode app target (DeltaGlyphTests,
   NumberCellSanitizeTests, RunStoreCoordinatorTests, RunProgressTests,
-  RunSummaryGroupingTests — +14 from this item), plus 90 across the
-  BenchKit/VSBCore/VSBRun SwiftPM packages.
+  RunSummaryGroupingTests, CalibrationStatusTests — +8 from Item 5),
+  plus 91 across the BenchKit/VSBCore/VSBRun SwiftPM packages
+  (BenchKit 71 with PeakMeasurement.writeCached round-trip test).
 - SchemaVersion is 1.2. `RunMetadata.wallTimeNanos: UInt64?` and
   `RunSummary.wallTimeNanos: UInt64?` are populated by
   `RunController.run()` from the queue's start/end clock ticks.
@@ -36,10 +37,12 @@ phase is now UI implementation against a locked design doc.
   manual "Add Files to Target" passes required** for files dropped into
   those existing trees. New top-level folders may still need wiring;
   add via Xcode if a new tree is needed.
-- Items DONE (8 → 4 remaining): 0 (design system), 1a (strip SwiftData
+- Items DONE (8 → 3 remaining): 0 (design system), 1a (strip SwiftData
   template), 1c (data spine), 2.0 (schema bump for wallTimeNanos),
-  2 (RunListSidebar + grouping + ThrottleDot).
-  Remaining: 5, 3a, 3b, 3c, 3d, 4a, 4b, 4c.
+  2 (RunListSidebar + grouping + ThrottleDot), 5.0 (PeakMeasurement
+  .writeCached), 5 (FirstLaunchView + CalibrationStatus +
+  CalibrationStatusFeed + AppRoot routing).
+  Remaining: 3a, 3b, 3c, 3d, 4a, 4b, 4c.
 - **Known Xcode quirk**: `xcodebuild ... test` fails at the test-target
   link step (unable to find BenchKit symbols). cmd-U from Xcode IDE
   works (presumably via scheme-level framework linking that diverges
@@ -80,57 +83,55 @@ phase is now UI implementation against a locked design doc.
      VectorSuiteBench/VectorSuiteBench/AppRoot.swift  ← placeholder sidebar
                                                        to be replaced.
 
-## Recommended sequence (6 sub-items → close 2.1)
+## Recommended sequence (5 sub-items → close 2.1)
 
-  1. **Item 5 — First-launch / calibration empty state.** Small,
-     self-contained, gates the empty-install UX. Good warm-up before
-     the detail-surface marathon.
-
-  2. **Item 3a → 3b → 3c → 3d** — detail surface (summary header,
+  1. **Item 3a → 3b → 3c → 3d** — detail surface (summary header,
      case table, throughput chart, diff toolbar placeholder).
 
-  3. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
+  2. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
 
-## First concrete task: Item 5 — First-launch / calibration empty state
+## First concrete task: Item 3a — Run-summary header
 
-When `~/Library/Application Support/VectorSuiteBench/peaks/<fingerprint>.json`
-is absent, the app needs an empty-state pane that:
-1. Welcomes the user.
-2. Explains why empirical peaks must be measured before the Roofline
-   chart can render.
-3. Triggers `PeakMeasurement.ensureCached(for: hardware, in: store)` on
-   click and shows a calibration progress feed.
-4. Once peaks land on disk, transitions to "Run your first benchmark"
-   (which for now points the user at `swift run vsb-run --preset smoke`
-   — the in-app New Run sheet is Item 4c).
+Replace `AppRoot`'s `detailPlaceholder` with a real header view per
+design doc §04 (Run Summary header) + §07 (thermal-throttle banner
+edge case).
 
-Read first:
-- Design doc §07 "First-launch UX" (or whichever section covers the
-  empty-state pane; verify exact heading).
-- `BenchKit/Hardware/PeakMeasurement.swift` — the API to invoke.
-- Plan §2 / Item 5 + §1.5 (locked decisions) + §2.6 (test strategy).
+Design doc highlights:
+- 7-cell info grid spanning the top of the detail pane. Each cell:
+  one line of label (caption), one line of value (mono, tabular),
+  one line of context (mono, lo-color). Cell borders are 1px hair
+  lines so the grid reads as one structure.
+- When `thermalEscalations > 0`: a warn-tinted **non-dismissable
+  banner** sits above the grid explaining when/how many events
+  occurred.
+- Hardware cell opens an `NSPopover` (locked decision §1.5/5) with
+  full chip details (cluster sizes, base/boost clocks, memory
+  channels). The headline shows just "M3 Max · 14C / 30G".
+- Body below the header reads "Coming next" until Item 3b lands the
+  CaseTable.
 
 Files to create:
-- `VectorSuiteBench/VectorSuiteBench/Views/FirstLaunchView.swift` — the
-  empty-state pane. Renders in `AppRoot.detail` when peaks are absent
-  AND no run is selected (or perhaps always when peaks are absent;
-  check the design doc).
-- `VectorSuiteBench/VectorSuiteBench/Models/CalibrationStatusFeed.swift`
-  — `@MainActor @Observable final class` that wraps `PeakMeasurement`
-  and exposes progress (state enum: `.idle / .running / .complete(peaks) /
-  .failed(error)`).
+- `VectorSuiteBench/VectorSuiteBench/Views/RunSummaryHeader.swift` —
+  the 7-cell info grid.
+- `VectorSuiteBench/VectorSuiteBench/Views/ThermalBanner.swift` — the
+  warn-tinted banner.
+- `VectorSuiteBench/VectorSuiteBench/Views/HardwareDetailPopover.swift`
+  — the NSPopover content for the hardware cell.
+- `VectorSuiteBench/VectorSuiteBench/Views/RunDetailView.swift` — host
+  view that loads a `RunDocument` from the coordinator and composes
+  the header + banner + placeholder body.
 
 Tests:
-- `CalibrationStatusFeedTests` — at minimum: idle → running on start;
-  state transitions are observable; cancellation leaves the feed in a
-  recoverable state.
+- `RunSummaryHeaderFormattingTests` — pure-function formatters for the
+  7 cells (preset, time, hardware fingerprint, swift/build, thermal
+  summary, harness floor, schema version).
 
 Wiring:
-- Gate the empty state on `coordinator.peakMeasurementExists(for:)` or
-  similar — RunStoreCoordinator may need a tiny helper that does
-  `FileManager.default.fileExists(atPath: store.peakURL(for:).path)`.
+- AppRoot's `detailPlaceholder` becomes `RunDetailView(selection:)`
+  conditional on `selectedRunID != nil`. When nil, show a "Select a
+  run" placeholder.
 
-Target tests after Item 5: ~128 total (125 + ~3 new).
+Target tests after Item 3a: ~140 total (134 + ~6 new).
 
 ## Conventions (don't violate)
 

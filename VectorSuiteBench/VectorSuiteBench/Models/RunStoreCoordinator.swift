@@ -112,6 +112,18 @@ final class RunStoreCoordinator {
         runCache.removeAll()
     }
 
+    /// Does a usable `peaks/<fingerprint>.json` record exist for this
+    /// hardware? Routes through `PeakMeasurement.loadCached(...)` which
+    /// also rejects records written under stale method versions — so a
+    /// `true` answer means the record is both present AND valid for the
+    /// current BenchKit build.
+    ///
+    /// Used by the first-launch flow (Item 5) to decide whether to show
+    /// the calibration empty state vs the normal detail pane.
+    func peaksExist(for hardware: HardwareInventory) -> Bool {
+        PeakMeasurement.loadCached(for: hardware.fingerprint, in: store) != nil
+    }
+
     // MARK: - Internals
 
     private static func modificationDate(of url: URL) -> Date? {

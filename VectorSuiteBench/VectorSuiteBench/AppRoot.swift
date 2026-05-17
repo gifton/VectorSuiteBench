@@ -2,8 +2,22 @@ import SwiftUI
 import BenchKit
 
 /// Top-level scene. `NavigationSplitView` with a sidebar (`RunListSidebar`,
-/// Item 2) and a detail pane (placeholder until Item 3a lands the
-/// `RunSummaryHeader` + `RunDetailView`).
+/// Item 2) and a detail pane that switches between the first-launch
+/// calibration empty state (Item 5) and the run-detail placeholder
+/// (replaced in Item 3a).
+///
+/// **Detail routing.** If `coordinator.peaksExist(for: hardware)` is
+/// false, the detail pane renders `FirstLaunchView` so the user calibrates
+/// before doing anything else. Once peaks land, the next body invocation
+/// — triggered by `CalibrationStatus.phase` flipping to `.complete` —
+/// re-checks `peaksExist`, returns true, and the detail swaps in. No
+/// explicit notification plumbing required; the Observation framework
+/// re-evaluates body when any observed property changes.
+///
+/// **Hardware fingerprint** is probed once at init and held for the
+/// lifetime of the scene. Recomputing per-body would be wasteful, and a
+/// hardware change while the app is open (dual-boot? hot-swap CPU?) is
+/// out of scope for 2.1.
 ///
 /// **Traffic-lights reservation.** macOS draws the Red/Yellow/Green
 /// window controls in the top-left of the window. SwiftUI's
@@ -13,6 +27,8 @@ import BenchKit
 struct AppRoot: View {
     @State private var coordinator = RunStoreCoordinator.makeDefault()
     @State private var selectedRunID: String? = nil
+    @State private var calibration = CalibrationStatus()
+    private let hardware: HardwareInventory = HardwareInventory.probe()
 
     var body: some View {
         NavigationSplitView {
@@ -22,7 +38,7 @@ struct AppRoot: View {
             )
             .navigationSplitViewColumnWidth(min: 240, ideal: 300)
         } detail: {
-            detailPlaceholder
+            detailPane
         }
         .onAppear {
             coordinator.startWatching()
@@ -31,6 +47,21 @@ struct AppRoot: View {
             coordinator.stopWatching()
         }
         .environment(coordinator)
+    }
+
+    // MARK: - Detail routing
+
+    @ViewBuilder
+    private var detailPane: some View {
+        if coordinator.peaksExist(for: hardware) {
+            detailPlaceholder
+        } else {
+            FirstLaunchView(
+                hardware: hardware,
+                store: coordinator.store,
+                calibration: calibration
+            )
+        }
     }
 
     // MARK: - Placeholder UI (replaced in Item 3a)
