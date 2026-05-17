@@ -7,9 +7,9 @@ import SwiftUI
 /// **Inflight pulse.** Per design doc §07 "Run still in progress" — the
 /// in-flight state pulses opacity 1.0 ↔ 0.4 with `easeInOut` so the dot
 /// reads as "alive" without spinning chrome that would clash with the
-/// rest of the static UI. The pulse is wrapped in a `PulseWhen` view
-/// modifier so `.onChange(of:)` can start / stop it cleanly when state
-/// transitions.
+/// rest of the static UI. The animation lives in the shared `PulseWhen`
+/// modifier (Components/Design/PulseWhen.swift) so cadence stays
+/// identical across every "alive" atom in the app.
 ///
 /// **Accessibility.** Every state exposes a `Text` label via
 /// `.accessibilityLabel(_:)` so screen readers and Voice Control see
@@ -51,34 +51,6 @@ struct VerificationDot: View {
             .frame(width: size, height: size)
             .modifier(PulseWhen(active: state == .inflight))
             .accessibilityLabel(state.accessibilityLabel)
-    }
-}
-
-/// Pulses `opacity` 1.0 ↔ 0.4 with a repeat-forever easeInOut while `active`
-/// is `true`. Pulled out so the animation lifecycle (start on appear /
-/// state transition; stop cleanly otherwise) is co-located.
-private struct PulseWhen: ViewModifier {
-    let active: Bool
-    @State private var lowOpacity = false
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(active ? (lowOpacity ? 0.4 : 1.0) : 1.0)
-            .onAppear { startIfActive() }
-            .onChange(of: active) { _, isActive in
-                if isActive {
-                    startIfActive()
-                } else {
-                    withAnimation(.default) { lowOpacity = false }
-                }
-            }
-    }
-
-    private func startIfActive() {
-        guard active else { return }
-        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-            lowOpacity = true
-        }
     }
 }
 

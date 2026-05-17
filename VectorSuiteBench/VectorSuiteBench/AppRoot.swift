@@ -17,8 +17,8 @@ struct AppRoot: View {
     var body: some View {
         NavigationSplitView {
             RunListSidebar(
-                coordinator: coordinator,
-                selectedRunID: $selectedRunID
+                summaries: coordinator.index.runs,
+                selection: $selectedRunID
             )
             .navigationSplitViewColumnWidth(min: 240, ideal: 300)
         } detail: {

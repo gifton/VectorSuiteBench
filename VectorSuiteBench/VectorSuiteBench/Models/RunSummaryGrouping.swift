@@ -154,18 +154,28 @@ enum RunSummaryGrouping {
     /// Compact wall-clock duration: "0.34s" / "23s" / "5m 23s" / "1h 12m".
     /// `nil` (pre-1.2 runs or finalize-without-stamp) renders as an em-dash
     /// so the column doesn't collapse silently.
+    ///
+    /// **Boundary handling.** The seconds-vs-minutes branch decides on the
+    /// rounded value, not the raw — so 59.6s renders as "1m 0s" (the same
+    /// number a user would write down), not "60s". Same logic at the
+    /// hour boundary.
     static func formatDuration(nanos: UInt64?) -> String {
         guard let nanos else { return "—" }
         let totalSeconds = Double(nanos) / 1_000_000_000
         if totalSeconds < 1 {
             return String(format: "%.2fs", totalSeconds)
         }
-        if totalSeconds < 60 {
-            return "\(Int(totalSeconds.rounded()))s"
+        // Round first so the branch decision matches the displayed number.
+        // Without this, 59.6 s falls into the seconds branch but
+        // `Int(59.6.rounded()) == 60` renders "60s" — an internally
+        // inconsistent reading.
+        let roundedSeconds = Int(totalSeconds.rounded())
+        if roundedSeconds < 60 {
+            return "\(roundedSeconds)s"
         }
-        let totalMinutes = Int(totalSeconds / 60)
+        let totalMinutes = roundedSeconds / 60
         if totalMinutes < 60 {
-            let secs = Int(totalSeconds) - totalMinutes * 60
+            let secs = roundedSeconds - totalMinutes * 60
             return "\(totalMinutes)m \(secs)s"
         }
         let hours = totalMinutes / 60
@@ -187,9 +197,15 @@ enum RunSummaryGrouping {
     /// the design-doc pill style. Unknown labels fall back to `.neutral` so
     /// a future preset doesn't crash the sidebar before its style lands.
     ///
-    /// Locked decision §1.5/2: pills are always present. This function is
-    /// the only place that maps preset → style, so a future restyling is a
-    /// single-call-site change.
+    /// **Provisional mapping.** The design doc says preset is "a colored
+    /// chip" but is silent on which color per preset. The mapping below is
+    /// the implementer's pick — accent for the dev-loop preset (smoke),
+    /// neutral for the default (standard), info for the long-form preset
+    /// (full), and warn for off-the-rails configurations (custom). Worth
+    /// raising in the next design review; this is the only call site so
+    /// a future restyling is a single-function change.
+    ///
+    /// Locked decision §1.5/2: pills are always present.
     static func presetPillStyle(for label: String) -> PillStyle {
         switch label {
         case "smoke":    return .accent     // fast / dev-loop runs read accent-tinted

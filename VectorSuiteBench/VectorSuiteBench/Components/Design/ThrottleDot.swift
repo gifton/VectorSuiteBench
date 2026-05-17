@@ -15,17 +15,25 @@ import SwiftUI
 ///                      throttle slot. (Item 4c wires this up; current
 ///                      callers always pass `.none` or `.thermal`.)
 ///
+/// **Defensive: `.thermal(0)` renders as `.none`.** Constructing the case
+/// directly with a zero count is a foot-gun (callers may forget the
+/// invariant), so the body switch normalizes it. The `init(escalations:)`
+/// convenience already maps `<= 0` to `.none` — direct-case construction
+/// gets the same safety net.
+///
 /// **Distinct from `VerificationDot`.** That atom signals per-case
 /// numerical correctness; this one signals per-run thermal integrity.
 /// They share the small-circle shape because both are read in the
 /// "is this row trustworthy?" glance — keeping them separate atoms
-/// keeps the semantics scannable in code search.
+/// keeps the semantics scannable in code search. Pulse animation lives
+/// in the shared `PulseWhen` modifier so both atoms use identical
+/// cadence.
 struct ThrottleDot: View {
-    let state: State
+    let indicator: Indicator
     let size: CGFloat
 
-    init(_ state: State, size: CGFloat = 6) {
-        self.state = state
+    init(_ indicator: Indicator, size: CGFloat = 6) {
+        self.indicator = indicator
         self.size = size
     }
 
@@ -37,7 +45,10 @@ struct ThrottleDot: View {
         self.init(escalations > 0 ? .thermal(escalations) : .none, size: size)
     }
 
-    enum State: Hashable, Sendable {
+    /// What the throttle slot displays. Named `Indicator` (not `State`) so
+    /// it doesn't collide with `SwiftUI.State` in code-search and review;
+    /// the slot's "state" lives in the parent row.
+    enum Indicator: Hashable, Sendable {
         case none
         case thermal(Int)
         case inflight
@@ -45,11 +56,14 @@ struct ThrottleDot: View {
 
     var body: some View {
         Group {
-            switch state {
+            switch indicator {
             case .none:
-                Color.clear
-                    .frame(width: size, height: size)
-                    .accessibilityHidden(true)
+                emptySlot
+            case .thermal(let count) where count <= 0:
+                // Defensive: caller constructed `.thermal(0)` directly.
+                // Render as the empty slot rather than a confusing warn
+                // dot with no underlying signal.
+                emptySlot
             case .thermal(let count):
                 Circle()
                     .fill(VSB.Status.warn)
@@ -67,34 +81,11 @@ struct ThrottleDot: View {
             }
         }
     }
-}
 
-/// Local copy of the pulse modifier — same animation as `VerificationDot`'s
-/// `.inflight` treatment so the two atoms read identically when both are
-/// pulsing (e.g. an in-flight case inside an in-flight run). Pulled out
-/// rather than imported because `VerificationDot.PulseWhen` is `private`.
-private struct PulseWhen: ViewModifier {
-    let active: Bool
-    @State private var lowOpacity = false
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(active ? (lowOpacity ? 0.4 : 1.0) : 1.0)
-            .onAppear { startIfActive() }
-            .onChange(of: active) { _, isActive in
-                if isActive {
-                    startIfActive()
-                } else {
-                    withAnimation(.default) { lowOpacity = false }
-                }
-            }
-    }
-
-    private func startIfActive() {
-        guard active else { return }
-        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-            lowOpacity = true
-        }
+    private var emptySlot: some View {
+        Color.clear
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 
@@ -104,6 +95,7 @@ private struct PulseWhen: ViewModifier {
         VStack(spacing: 6) { ThrottleDot(.thermal(1));    Text("thermal × 1").vsbMonoSha() }
         VStack(spacing: 6) { ThrottleDot(.thermal(4));    Text("thermal × 4").vsbMonoSha() }
         VStack(spacing: 6) { ThrottleDot(.inflight);      Text("inflight (pulses)").vsbMonoSha() }
+        VStack(spacing: 6) { ThrottleDot(.thermal(0));    Text("thermal(0) → empty").vsbMonoSha() }
     }
     .padding(24)
     .background(VSB.Surface.bg)

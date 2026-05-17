@@ -51,8 +51,8 @@ struct RunSummaryGroupingTests {
         #expect(buckets[0].summaries.map(\.runID) == ["c", "b", "a"])
     }
 
-    @Test("Same-day runs across the calendar boundary are NOT in Today")
-    func calendarBoundary() {
+    @Test("Two-days-back runs do NOT collapse into Yesterday")
+    func twoDaysBackNotYesterday() {
         // Anchor: 2026-05-17 14:00 UTC. A run timestamped at 23:59 the day
         // *before yesterday* lives in its own .day(...) bucket, not in
         // "Yesterday" — yesterday is strictly the 24-hour calendar day
@@ -67,6 +67,26 @@ struct RunSummaryGroupingTests {
         if case .day = buckets[0].section { /* ok */ } else {
             Issue.record(Comment(rawValue: "expected .day(...) for two-days-back run; got \(buckets[0].section)"))
         }
+    }
+
+    @Test("Shuffled cross-section input lands in the right buckets, newest-first")
+    func crossSectionShuffle() {
+        // Interleave Today / Yesterday / older inputs in adversarial order
+        // so `group(...)` is forced to both bucket and re-sort.
+        let summaries = [
+            makeSummary(id: "old-a", at: anchor.adding(days: -4)),
+            makeSummary(id: "t1",    at: anchor.adding(hours: -1)),
+            makeSummary(id: "y1",    at: anchor.adding(days: -1)),
+            makeSummary(id: "old-b", at: anchor.adding(days: -4).adding(hours: -3)),
+            makeSummary(id: "t2",    at: anchor.adding(hours: -4)),
+        ]
+        let buckets = RunSummaryGrouping.group(summaries, now: anchor, calendar: gregorianUTC)
+        #expect(buckets.count == 3)
+        #expect(buckets[0].section == .today)
+        #expect(buckets[0].summaries.map(\.runID) == ["t1", "t2"])
+        #expect(buckets[1].section == .yesterday)
+        #expect(buckets[1].summaries.map(\.runID) == ["y1"])
+        #expect(buckets[2].summaries.map(\.runID) == ["old-a", "old-b"])
     }
 
     @Test("Distinct older days produce distinct .day buckets")
@@ -150,6 +170,48 @@ struct RunSummaryGroupingTests {
     func durationHours() {
         // 1h 12m == 72m == 4320s.
         #expect(RunSummaryGrouping.formatDuration(nanos: 4_320_000_000_000) == "1h 12m")
+    }
+
+    @Test("formatDuration — seconds boundary rounds up into minutes")
+    func durationSecondsBoundary() {
+        // 59.6 s rounds to 60 s. The pre-rounding branch decision used to
+        // produce "60s" (inconsistent: branch said "seconds-only", number
+        // said "1 minute"). The post-rounding decision puts it cleanly in
+        // the minutes branch.
+        let nanos = UInt64(59.6 * 1_000_000_000)
+        #expect(RunSummaryGrouping.formatDuration(nanos: nanos) == "1m 0s")
+    }
+
+    @Test("formatDuration — hours boundary rounds up cleanly")
+    func durationHoursBoundary() {
+        // 3599.6 s == ~59m 59.6s. After rounding, that's 3600 s == 1h 0m.
+        let nanos = UInt64(3599.6 * 1_000_000_000)
+        #expect(RunSummaryGrouping.formatDuration(nanos: nanos) == "1h 0m")
+    }
+
+    @Test("formatTimeOfDay — pinned locale renders HH:MM")
+    func timeOfDayPosix() {
+        // 14:32 in UTC under en_US_POSIX. POSIX is 24-hour by convention,
+        // so we can assert an exact string. Production callers use
+        // Locale.current — verified visually via #Preview, not in tests.
+        let date = makeDate(year: 2026, month: 5, day: 17, hour: 14, minute: 32)
+        let rendered = RunSummaryGrouping.formatTimeOfDay(
+            date,
+            calendar: gregorianUTC,
+            locale: Locale(identifier: "en_US_POSIX")
+        )
+        // POSIX time-style .short renders "14:32".
+        #expect(rendered == "14:32",
+                Comment(rawValue: "expected '14:32'; got '\(rendered)'"))
+    }
+
+    @Test("presetPillText — uppercases label, leaves non-letters alone")
+    func presetText() {
+        #expect(RunSummaryGrouping.presetPillText(for: "smoke") == "SMOKE")
+        #expect(RunSummaryGrouping.presetPillText(for: "full") == "FULL")
+        // Empty label stays empty — the sidebar's preset slot would render
+        // an empty pill; that's a caller-side concern, not the formatter's.
+        #expect(RunSummaryGrouping.presetPillText(for: "") == "")
     }
 
     @Test("formatCaseCount — complete vs truncated")
