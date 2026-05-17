@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C065CA0B2FB996D1003857F6 /* vsb-run in Frameworks */ = {isa = PBXBuildFile; productRef = C065CA0A2FB996D1003857F6 /* vsb-run */; };
+		C065CA0E2FB996DD003857F6 /* VSBCore in Frameworks */ = {isa = PBXBuildFile; productRef = C065CA0D2FB996DD003857F6 /* VSBCore */; };
+		C065CA112FB996E6003857F6 /* BenchKit in Frameworks */ = {isa = PBXBuildFile; productRef = C065CA102FB996E6003857F6 /* BenchKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		C02CDB3A2FB1A7B700CCC302 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +58,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C065CA0B2FB996D1003857F6 /* vsb-run in Frameworks */,
+				C065CA0E2FB996DD003857F6 /* VSBCore in Frameworks */,
+				C065CA112FB996E6003857F6 /* BenchKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +121,9 @@
 			);
 			name = VectorSuiteBench;
 			packageProductDependencies = (
+				C065CA0A2FB996D1003857F6 /* vsb-run */,
+				C065CA0D2FB996DD003857F6 /* VSBCore */,
+				C065CA102FB996E6003857F6 /* BenchKit */,
 			);
 			productName = VectorSuiteBench;
 			productReference = C02CDB2A2FB1A7B600CCC302 /* VectorSuiteBench.app */;
@@ -195,6 +207,11 @@
 			);
 			mainGroup = C02CDB212FB1A7B600CCC302;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C065CA092FB996D1003857F6 /* XCLocalSwiftPackageReference "../Packages/VSBRun" */,
+				C065CA0C2FB996DD003857F6 /* XCLocalSwiftPackageReference "../Packages/VSBCore" */,
+				C065CA0F2FB996E6003857F6 /* XCLocalSwiftPackageReference "../Packages/BenchKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C02CDB2B2FB1A7B600CCC302 /* Products */;
 			projectDirPath = "";
@@ -573,6 +590,36 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C065CA092FB996D1003857F6 /* XCLocalSwiftPackageReference "../Packages/VSBRun" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/VSBRun;
+		};
+		C065CA0C2FB996DD003857F6 /* XCLocalSwiftPackageReference "../Packages/VSBCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/VSBCore;
+		};
+		C065CA0F2FB996E6003857F6 /* XCLocalSwiftPackageReference "../Packages/BenchKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/BenchKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C065CA0A2FB996D1003857F6 /* vsb-run */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = "vsb-run";
+		};
+		C065CA0D2FB996DD003857F6 /* VSBCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VSBCore;
+		};
+		C065CA102FB996E6003857F6 /* BenchKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BenchKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C02CDB222FB1A7B600CCC302 /* Project object */;
 }
