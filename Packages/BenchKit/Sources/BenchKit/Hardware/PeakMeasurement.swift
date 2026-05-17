@@ -148,6 +148,12 @@ public enum PeakMeasurement {
     /// Ensure a peak record exists for this hardware fingerprint. Returns
     /// the cached record on hit; runs both microkernels and writes a new
     /// record on miss/stale.
+    ///
+    /// **Granular-progress callers** (e.g. the app's first-launch
+    /// calibration UI) should orchestrate `measureCompute()` /
+    /// `measureBandwidth()` themselves and finish with `writeCached(_:in:)`
+    /// — this convenience runs both stages end-to-end without surfacing
+    /// the mid-flight transition.
     @discardableResult
     public static func ensureCached(
         for hardware: HardwareInventory,
@@ -169,8 +175,29 @@ public enum PeakMeasurement {
                 bandwidth: bandwidthMethodVersion
             )
         )
-        try writePeakRecord(record, in: store)
+        try writeCached(record, in: store)
         return record
+    }
+
+    /// Persist a `PeakRecord` to `peaks/<fingerprint>.json` atomically.
+    /// Exposed (rather than buried in `ensureCached`) so callers that
+    /// drive the two measurement stages themselves — typically the UI's
+    /// progress-emitting calibration flow — can finalize the write.
+    ///
+    /// Atomic via Foundation's `Data.write(options: .atomic)` (temp+rename).
+    /// Readers never see a half-written file; a crash mid-write leaves
+    /// the previous record (or no record) in place.
+    public static func writeCached(_ record: PeakRecord, in store: RunStore) throws {
+        let url = store.peakURL(for: record.hardwareFingerprint)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(record)
+        try data.write(to: url, options: .atomic)
     }
 
     // MARK: - Internals
@@ -287,19 +314,6 @@ public enum PeakMeasurement {
         }
     }
 
-    private static func writePeakRecord(_ record: PeakRecord, in store: RunStore) throws {
-        let url = store.peakURL(for: record.hardwareFingerprint)
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(record)
-        // Atomic temp+rename via Foundation's `.atomic`.
-        try data.write(to: url, options: .atomic)
-    }
 }
 
 // MARK: - Types

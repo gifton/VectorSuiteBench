@@ -55,6 +55,33 @@ struct PeakMeasurementTests {
         #expect(abs(cached.measuredAt.timeIntervalSince(record.measuredAt)) < 1.0)
     }
 
+    @Test("writeCached round-trips a hand-built record through loadCached")
+    func writeCachedRoundTrip() throws {
+        let tmp = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = RunStore(rootURL: tmp)
+        let hardware = HardwareInventory.probe()
+
+        let record = PeakRecord(
+            schemaVersion: .current,
+            hardwareFingerprint: hardware.fingerprint,
+            measuredAt: Date(timeIntervalSince1970: 1_700_000_000),
+            peakComputeGFLOPS: 384.2,
+            peakBandwidthGBPerSec: 312.5,
+            method: PeakMethod(
+                compute: PeakMeasurement.computeMethodVersion,
+                bandwidth: PeakMeasurement.bandwidthMethodVersion
+            )
+        )
+
+        try PeakMeasurement.writeCached(record, in: store)
+        let reloaded = try #require(PeakMeasurement.loadCached(for: hardware.fingerprint, in: store))
+        #expect(reloaded.hardwareFingerprint == hardware.fingerprint)
+        #expect(reloaded.peakComputeGFLOPS == 384.2)
+        #expect(reloaded.peakBandwidthGBPerSec == 312.5)
+        #expect(reloaded.method == record.method)
+    }
+
     @Test("loadCached returns nil when the cached method version is stale")
     func staleMethodInvalidatesCache() async throws {
         let tmp = try makeTempDir()
