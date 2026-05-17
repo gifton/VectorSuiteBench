@@ -14,26 +14,37 @@ phase is now UI implementation against a locked design doc.
 
 - Repo: /Users/goftin/dev/gsuite/VectorSuiteBench · main · push authorized
 - GitHub: gifton/VectorSuiteBench
-- Last commit (after Item 2.0 schema bump): see `git log -1 --oneline`
-- Tests: ~112 total. ~22 in the Xcode app target (DeltaGlyphTests,
-  NumberCellSanitizeTests, RunStoreCoordinatorTests, RunProgressTests),
-  plus 90 across the BenchKit/VSBCore/VSBRun SwiftPM packages (BenchKit
-  bumped from 67 → 70 with the schema-bump tests).
-- SchemaVersion is now 1.2. `RunMetadata.wallTimeNanos: UInt64?` and
+- Last commit (after Item 2): see `git log -1 --oneline`
+- Tests: ~125 total. ~36 in the Xcode app target (DeltaGlyphTests,
+  NumberCellSanitizeTests, RunStoreCoordinatorTests, RunProgressTests,
+  RunSummaryGroupingTests — +14 from this item), plus 90 across the
+  BenchKit/VSBCore/VSBRun SwiftPM packages.
+- SchemaVersion is 1.2. `RunMetadata.wallTimeNanos: UInt64?` and
   `RunSummary.wallTimeNanos: UInt64?` are populated by
-  `RunController.run()` from the queue's start/end clock ticks and
-  rewritten into the manifest by `RunStore.finalizeRun(runID:wallTimeNanos:)`.
-  Pre-1.2 documents decode cleanly with nil.
-- Xcode app target: builds clean. NavigationSplitView shell launches with
-  a RunStoreCoordinator wired to
-  ~/Library/Application Support/VectorSuiteBench/ and a temporary
-  tappable sidebar listing runs by preset+SHA. Selecting a row loads the
-  RunDocument and shows the case count. Crude, but proves the
-  BenchKit→UI data spine is alive.
-- Items DONE (8 → 5 remaining): 0 (design system), 1a (strip SwiftData
-  template), 1c (data spine), 2.0 (schema bump for wallTimeNanos).
-  Remaining: 2 (sidebar — schema is ready, view still needs writing),
-  5, 3a, 3b, 3c, 3d, 4a, 4b, 4c.
+  `RunController.run()` from the queue's start/end clock ticks.
+- Xcode app target: builds clean (verified via `xcodebuild ... build`).
+  `AppRoot` uses the real `RunListSidebar` — three-line rows grouped by
+  relative date (Today / Yesterday / older), preset pill + branch +
+  short SHA on line 2, duration + case count on line 3, throttle dot
+  in the top-right when `thermalEscalations > 0`. Selection writes
+  through to `AppRoot.selectedRunID`.
+- **Xcode synchronized groups discovery**: the project uses Xcode's
+  modern synchronized-folder references — new `.swift` files in
+  `VectorSuiteBench/`, `VectorSuiteBench/Models/`,
+  `VectorSuiteBench/Views/`, `VectorSuiteBench/Components/Design/`, and
+  `VectorSuiteBenchTests/` are picked up automatically. **No more
+  manual "Add Files to Target" passes required** for files dropped into
+  those existing trees. New top-level folders may still need wiring;
+  add via Xcode if a new tree is needed.
+- Items DONE (8 → 4 remaining): 0 (design system), 1a (strip SwiftData
+  template), 1c (data spine), 2.0 (schema bump for wallTimeNanos),
+  2 (RunListSidebar + grouping + ThrottleDot).
+  Remaining: 5, 3a, 3b, 3c, 3d, 4a, 4b, 4c.
+- **Known Xcode quirk**: `xcodebuild ... test` fails at the test-target
+  link step (unable to find BenchKit symbols). cmd-U from Xcode IDE
+  works (presumably via scheme-level framework linking that diverges
+  from CLI). Pre-existing — predates Item 2. Worth diagnosing as a
+  cleanup pass but does NOT block any item.
 
 ## Read first (don't skip)
 
@@ -69,63 +80,57 @@ phase is now UI implementation against a locked design doc.
      VectorSuiteBench/VectorSuiteBench/AppRoot.swift  ← placeholder sidebar
                                                        to be replaced.
 
-## Recommended sequence (7 sub-items → close 2.1)
+## Recommended sequence (6 sub-items → close 2.1)
 
-  1. **Item 2 — RunListSidebar** (critical path — unblocks 3a/b/c/d).
-     Schema is ready (wallTimeNanos in RunSummary); the view-side work
-     is the only thing left for Item 2.
+  1. **Item 5 — First-launch / calibration empty state.** Small,
+     self-contained, gates the empty-install UX. Good warm-up before
+     the detail-surface marathon.
 
-  2. **Item 5 — First-launch / calibration empty state.**
+  2. **Item 3a → 3b → 3c → 3d** — detail surface (summary header,
+     case table, throughput chart, diff toolbar placeholder).
 
-  3. **Item 3a → 3b → 3c → 3d** — detail surface.
+  3. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
 
-  4. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
+## First concrete task: Item 5 — First-launch / calibration empty state
 
-## First concrete task: Item 2 — RunListSidebar (view-side)
+When `~/Library/Application Support/VectorSuiteBench/peaks/<fingerprint>.json`
+is absent, the app needs an empty-state pane that:
+1. Welcomes the user.
+2. Explains why empirical peaks must be measured before the Roofline
+   chart can render.
+3. Triggers `PeakMeasurement.ensureCached(for: hardware, in: store)` on
+   click and shows a calibration progress feed.
+4. Once peaks land on disk, transitions to "Run your first benchmark"
+   (which for now points the user at `swift run vsb-run --preset smoke`
+   — the in-app New Run sheet is Item 4c).
 
-Replace the placeholder list in `AppRoot.swift` (currently inside
-`sidebarPlaceholder`, lines ~53–71) with a dedicated `RunListSidebar`.
-
-Design doc §04 (read it). Specs:
-- Three-line rows, ~62 px tall, in a `List` with relative-date section
-  headers ("Today" / "Yesterday" / "May 13"). Locked decision §1.5/1:
-  3-line default; NO compact toggle.
-- Line 1: time (HH:MM) — implicit from group header.
-- Line 2: preset chip (use Pill — `.accent` for SMOKE, `.neutral` for
-  STANDARD/FULL, `.warn` for CUSTOM, or similar; check design doc) +
-  branch in `.vsbBody(color: VSB.Text.md)` + short SHA via `.vsbMonoSha()`.
-- Line 3: duration (formatted from `summary.wallTimeNanos`) + case count
-  ("342 cases" or "342/600" when `completedCaseCount < caseCount`).
-- Top-right of row: warn-colored dot (probably a new `ThrottleDot` atom —
-  distinct semantic from VerificationDot) when
-  `summary.thermalEscalations > 0`.
-- Sortable via header toolbar buttons or context menu: by date (default,
-  newest first), sha, preset, case count.
-- Click selects → write to `AppRoot.selectedRunID` via the environment-
-  passed coordinator OR `@Binding` from AppRoot.
+Read first:
+- Design doc §07 "First-launch UX" (or whichever section covers the
+  empty-state pane; verify exact heading).
+- `BenchKit/Hardware/PeakMeasurement.swift` — the API to invoke.
+- Plan §2 / Item 5 + §1.5 (locked decisions) + §2.6 (test strategy).
 
 Files to create:
-- `VectorSuiteBench/VectorSuiteBench/Views/RunListSidebar.swift`
-- `VectorSuiteBench/VectorSuiteBench/Models/RunSummaryGrouping.swift`
-  — pure functions that bucket [RunSummary] into [(SectionHeader, [Summary])]
-  by relative date (Today / Yesterday / weekday-name / formatted-date).
-  Pull out as pure functions so they're unit-testable without SwiftUI.
-- `VectorSuiteBench/VectorSuiteBench/Views/ThrottleDot.swift` (probably
-  warrants its own atom — distinct semantic from VerificationDot).
+- `VectorSuiteBench/VectorSuiteBench/Views/FirstLaunchView.swift` — the
+  empty-state pane. Renders in `AppRoot.detail` when peaks are absent
+  AND no run is selected (or perhaps always when peaks are absent;
+  check the design doc).
+- `VectorSuiteBench/VectorSuiteBench/Models/CalibrationStatusFeed.swift`
+  — `@MainActor @Observable final class` that wraps `PeakMeasurement`
+  and exposes progress (state enum: `.idle / .running / .complete(peaks) /
+  .failed(error)`).
 
-Tests (in VectorSuiteBenchTests/):
-- `RunSummaryGroupingTests` — given a list of summaries with timestamps
-  ranging over today/yesterday/last-week/last-month, verify the
-  grouping produces the right section headers and the right ordering
-  within and across sections.
+Tests:
+- `CalibrationStatusFeedTests` — at minimum: idle → running on start;
+  state transitions are observable; cancellation leaves the feed in a
+  recoverable state.
 
-### Closing Item 2
+Wiring:
+- Gate the empty state on `coordinator.peakMeasurementExists(for:)` or
+  similar — RunStoreCoordinator may need a tiny helper that does
+  `FileManager.default.fileExists(atPath: store.peakURL(for:).path)`.
 
-Update AppRoot to use `RunListSidebar` and remove the placeholder list.
-User performs Xcode "Add Files to Target" pass for the new files; cmd-B
-+ cmd-U should be green.
-
-Target tests after Item 2: ~118 total (112 + ~6 new).
+Target tests after Item 5: ~128 total (125 + ~3 new).
 
 ## Conventions (don't violate)
 
