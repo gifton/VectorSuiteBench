@@ -14,8 +14,14 @@ import SwiftUI
 /// `.modifier(HatchedFillModifier(active: isApprox))` unconditionally.
 struct HatchedFillModifier: ViewModifier {
     let active: Bool
-    var strokeColor: Color = .white.opacity(0.25)
-    var pitch: CGFloat = 5
+    let strokeColor: Color
+    let pitch: CGFloat
+
+    init(active: Bool, strokeColor: Color = .white.opacity(0.25), pitch: CGFloat = 5) {
+        self.active = active
+        self.strokeColor = strokeColor
+        self.pitch = pitch
+    }
 
     func body(content: Content) -> some View {
         if active {

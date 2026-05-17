@@ -10,29 +10,45 @@ import SwiftUI
 /// approximate-math rows without changing the hue (color alone is too
 /// quiet at this size).
 ///
-/// Pass an optional icon character (`✓ ✕ ! ⌇ ⏱ ~`) — these are rendered
-/// inline at the same font so the badge stays one continuous chip.
+/// **Two initializers** for the optional leading icon:
+/// - `Pill(_, style:, icon: Character?)` — character glyphs (`✓ ✕ ! ⌇ ⏱ ~`).
+/// - `Pill(_, style:, systemImage: String)` — SF Symbols (used by toolbar
+///   chrome and chart headers where the icon is a real Apple glyph).
 struct Pill: View {
     let text: String
     let style: PillStyle
-    let icon: Character?
+    let icon: Icon
 
+    enum Icon {
+        case none
+        case character(Character)
+        case systemImage(String)
+    }
+
+    /// Character-glyph initializer. Pass a single Unicode character (or `nil`
+    /// for no icon). Use this for the SF-Mono native glyphs in the design
+    /// doc (`✓ ✕ ! ⌇ ⏱ ~`).
     init(_ text: String, style: PillStyle, icon: Character? = nil) {
         self.text = text
         self.style = style
-        self.icon = icon
+        self.icon = icon.map(Icon.character) ?? .none
+    }
+
+    /// SF Symbol initializer. Use this when the icon is a real Apple glyph
+    /// (`plus`, `chevron.left.forwardslash.chevron.right`, etc.) — the
+    /// symbol is rendered at the pill's font size with `.heavy` weight.
+    init(_ text: String, style: PillStyle, systemImage: String) {
+        self.text = text
+        self.style = style
+        self.icon = .systemImage(systemImage)
     }
 
     var body: some View {
         HStack(spacing: 3) {
-            if let icon {
-                Text(String(icon))
-            }
+            iconView
             Text(text)
         }
-        .font(VSBFont.monoBadge)
-        .tracking(0.4)
-        .foregroundStyle(style.foreground)
+        .vsbMonoBadge(color: style.foreground)
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .background(style.background)
@@ -41,6 +57,20 @@ struct Pill: View {
                 .strokeBorder(style.border, style: style.borderStyle)
         )
         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var iconView: some View {
+        switch icon {
+        case .none:
+            EmptyView()
+        case .character(let c):
+            Text(String(c))
+        case .systemImage(let name):
+            // Inherit pill foreground via the `vsbMonoBadge` cascade.
+            Image(systemName: name)
+                .imageScale(.small)
+        }
     }
 }
 
@@ -115,6 +145,12 @@ private extension PillStyle {
             Pill("TRUNCATED",   style: .warn, icon: "⏱")
             Pill("APPROX",      style: .approx, icon: "~")
             Pill("STANDARD",    style: .accent)
+        }
+        HStack(spacing: 6) {
+            Pill("NEW RUN",     style: .accent,  systemImage: "plus")
+            Pill("COMPARE",     style: .neutral, systemImage: "rectangle.split.2x1")
+            Pill("EXPORT",      style: .neutral, systemImage: "square.and.arrow.down")
+            Pill("CALIBRATE",   style: .neutral, systemImage: "scope")
         }
     }
     .padding(24)

@@ -33,13 +33,19 @@ struct DeltaGlyph: View {
     var body: some View {
         switch value {
         case .percent(let p):
-            let good = polarity.isGood(delta: p)
+            let glyph: String = p < 0 ? "▼" : (p > 0 ? "▲" : "·")
+            // Zero renders as a bare "0%" — the forced-`+` of "%+.0f%%"
+            // makes "+0%" read like a deliberate-but-meaningless signed
+            // value, which it isn't.
+            let percentText: String = p == 0 ? "0%" : String(format: "%+.0f%%", p)
+            let color: Color = p == 0
+                ? VSB.Text.lo
+                : (polarity.isGood(delta: p) ? VSB.Status.pass : VSB.Status.fail)
             HStack(spacing: 2) {
-                Text(p < 0 ? "▼" : (p > 0 ? "▲" : "·"))
-                Text(String(format: "%+.0f%%", p))
+                Text(glyph)
+                Text(percentText)
             }
-            .font(VSBFont.monoShaAxis)
-            .foregroundStyle(p == 0 ? VSB.Text.lo : (good ? VSB.Status.pass : VSB.Status.fail))
+            .vsbMonoSha(color: color)
         case .absent:
             Text("—")
                 .vsbMonoSha()
@@ -60,7 +66,9 @@ enum DeltaPolarity: Hashable, Sendable {
     case higherIsBetter
 
     /// Returns `true` when the delta improves the metric. Zero is never
-    /// "good" — there's no improvement.
+    /// "good" — there's no improvement. NaN / Inf also yield `false`
+    /// (`<` and `>` against a NaN are always false) — meaning is
+    /// undefined, so we don't claim improvement.
     func isGood(delta: Double) -> Bool {
         switch self {
         case .lowerIsBetter:  return delta < 0

@@ -7,11 +7,8 @@ import SwiftUI
 ///
 /// `ImplDisplayKind` is a local enum that **mirrors `BenchKit.ImplKind`**
 /// — kept local so this file compiles before the BenchKit SwiftPM
-/// dependency is added in Item 1b. Once the dep lands, add an adapter:
-/// ```
-/// extension ImplKind { var display: ImplDisplayKind { ... } }
-/// ```
-/// at the seam (Item 3b) — do not re-export this enum from BenchKit.
+/// dependency is added in Item 1b. The adapter is documented at the
+/// bottom of this file; write it (with its test) at the seam in Item 3b.
 struct ImplSwatch: View {
     let impl: ImplDisplayKind
     let isApproximate: Bool
@@ -26,6 +23,10 @@ struct ImplSwatch: View {
             .fill(impl.color)
             .frame(width: 10, height: 10)
             .modifier(HatchedFillModifier(active: isApproximate))
+            // The `clipShape` is NOT redundant — `HatchedFillModifier`
+            // overlays a Canvas that draws across the full 10×10 bounding
+            // box; without this clip, the diagonal lines stick out past
+            // the rounded corners on approximate swatches.
             .clipShape(RoundedRectangle(cornerRadius: 1.5, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 1.5, style: .continuous)
@@ -75,6 +76,57 @@ enum ImplDisplayKind: String, CaseIterable, Hashable, Sendable {
         }
     }
 }
+
+// MARK: - BenchKit adapter contract (write in Item 3b)
+//
+// Once BenchKit is added as a SwiftPM dependency (Item 1b), write this
+// adapter at the data seam (Item 3b — wherever the table's data builder
+// maps `WorkloadID` into row models):
+//
+//     import BenchKit
+//
+//     extension ImplKind {
+//         var display: ImplDisplayKind {
+//             switch self {
+//             case .vectorCore: return .vectorCore
+//             case .accelerate: return .accelerate
+//             case .naive:      return .naive
+//             case .simd:       return .simd
+//             }
+//         }
+//     }
+//
+// **Mapping decisions (pinned — do not alter without raising):**
+// - `accelerate` (BenchKit's `cblas_sdot` path, which lives in
+//   Accelerate.framework's BLAS sub-API) maps to `.accelerate`, NOT
+//   `.vDSP`. vDSP is a sibling sub-API; BenchKit uses BLAS, so the
+//   "Accelerate" graphite is the right baseline color.
+// - `.vDSP` and `.metal` in `ImplDisplayKind` are reserved for Phase 2.2 /
+//   2.3+ when corresponding `ImplKind` cases land. They are intentionally
+//   present in the display layer so the design tokens stay stable across
+//   phases.
+//
+// **Required test** (write alongside the adapter; this prevents drift
+// when BenchKit adds a new `ImplKind` case without updating the design
+// layer):
+//
+//     import Testing
+//     @testable import VectorSuiteBench
+//     import BenchKit
+//
+//     @Test("Every BenchKit ImplKind has a display mapping")
+//     func adapterIsTotal() {
+//         for kind in ImplKind.allCases {
+//             _ = kind.display   // Compiler enforces exhaustiveness on the
+//                                // switch above; this loop ensures any new
+//                                // case shows up as a runtime miss too.
+//         }
+//     }
+//
+// The `for kind in ImplKind.allCases { _ = kind.display }` form is the
+// drift guard. Adding a new `ImplKind` without updating the switch
+// breaks the build (exhaustive switch), not the runtime — that's the
+// design contract.
 
 #Preview("ImplSwatch — all kinds, exact + approximate") {
     VStack(alignment: .leading, spacing: 12) {

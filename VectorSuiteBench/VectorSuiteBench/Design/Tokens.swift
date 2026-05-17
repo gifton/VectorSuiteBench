@@ -17,16 +17,24 @@ import SwiftUI
 ///   not the loudness.
 /// - The 5-step text ramp + 4-step surface ramp keep contrast deliberate;
 ///   most numbers render at `text.hi`, supporting labels at `text.lo`.
+///
+/// **Namespacing convention:** every token lives under `VSB` (sub-enums
+/// for category). Fonts are also nested as `VSB.Fonts` (see Typography.swift).
+/// View modifiers (`vsbBody`, `vsbCaption`, …) are top-level `View`
+/// extensions — that's the only idiomatic SwiftUI place for them.
+///
+/// `Color` values use the explicit `.sRGB` initializer so the color space
+/// is locked against future SwiftUI changes.
 enum VSB {
     enum Surface {
         /// Page background. Anything below this is the window chrome.
-        static let bg       = Color(red: 21/255, green: 22/255, blue: 26/255)   // #15161A
+        static let bg       = Color(.sRGB, red: 21/255, green: 22/255, blue: 26/255, opacity: 1)   // #15161A
         /// Lowest card surface (sidebar rows, summary cells).
-        static let s0       = Color(red: 27/255, green: 28/255, blue: 33/255)   // #1B1C21
-        static let s1       = Color(red: 34/255, green: 35/255, blue: 42/255)   // #22232A
-        static let s2       = Color(red: 42/255, green: 44/255, blue: 52/255)   // #2A2C34
+        static let s0       = Color(.sRGB, red: 27/255, green: 28/255, blue: 33/255, opacity: 1)   // #1B1C21
+        static let s1       = Color(.sRGB, red: 34/255, green: 35/255, blue: 42/255, opacity: 1)   // #22232A
+        static let s2       = Color(.sRGB, red: 42/255, green: 44/255, blue: 52/255, opacity: 1)   // #2A2C34
         /// Highest surface — toolbar selected state, modal sheet body.
-        static let s3       = Color(red: 51/255, green: 53/255, blue: 62/255)   // #33353E
+        static let s3       = Color(.sRGB, red: 51/255, green: 53/255, blue: 62/255, opacity: 1)   // #33353E
 
         /// Hair lines between table rows / grid cells. Almost invisible.
         static let hair     = Color.white.opacity(0.06)
@@ -41,10 +49,10 @@ enum VSB {
     /// step that still reads — keeping text demoted is what lets numbers
     /// dominate the page.
     enum Text {
-        static let hi       = Color(red: 231/255, green: 232/255, blue: 236/255) // #E7E8EC
-        static let md       = Color(red: 164/255, green: 166/255, blue: 174/255) // #A4A6AE
-        static let lo       = Color(red: 108/255, green: 110/255, blue: 120/255) // #6C6E78
-        static let dim      = Color(red:  74/255, green:  76/255, blue:  84/255) // #4A4C54
+        static let hi       = Color(.sRGB, red: 231/255, green: 232/255, blue: 236/255, opacity: 1) // #E7E8EC
+        static let md       = Color(.sRGB, red: 164/255, green: 166/255, blue: 174/255, opacity: 1) // #A4A6AE
+        static let lo       = Color(.sRGB, red: 108/255, green: 110/255, blue: 120/255, opacity: 1) // #6C6E78
+        static let dim      = Color(.sRGB, red:  74/255, green:  76/255, blue:  84/255, opacity: 1) // #4A4C54
     }
 
     /// Implementation tokens. Drives both 10×10 `ImplSwatch` swatches and
@@ -56,24 +64,24 @@ enum VSB {
     /// quiet enough that a chart filled with baselines doesn't compete
     /// with VectorCore's accent.
     enum Impl {
-        static let vectorCore   = Color(red:   0/255, green: 201/255, blue: 211/255) // #00C9D3 — the only vibrant
-        static let vDSP         = Color(red: 172/255, green: 165/255, blue: 156/255) // #ACA59C — warm graphite
-        static let accelerate   = Color(red: 159/255, green: 161/255, blue: 181/255) // #9FA1B5 — cool graphite
-        static let metal        = Color(red: 179/255, green: 164/255, blue: 176/255) // #B3A4B0 — magenta graphite (reserved for 2.3+)
-        static let naive        = Color(red: 137/255, green: 139/255, blue: 148/255) // #898B94 — neutral cool gray
-        static let simd         = Color(red: 181/255, green: 169/255, blue: 154/255) // #B5A99A — warm graphite (distinct from vDSP)
+        static let vectorCore   = Color(.sRGB, red:   0/255, green: 201/255, blue: 211/255, opacity: 1) // #00C9D3 — the only vibrant
+        static let vDSP         = Color(.sRGB, red: 172/255, green: 165/255, blue: 156/255, opacity: 1) // #ACA59C — warm graphite
+        static let accelerate   = Color(.sRGB, red: 159/255, green: 161/255, blue: 181/255, opacity: 1) // #9FA1B5 — cool graphite
+        static let metal        = Color(.sRGB, red: 179/255, green: 164/255, blue: 176/255, opacity: 1) // #B3A4B0 — magenta graphite (reserved for 2.3+)
+        static let naive        = Color(.sRGB, red: 137/255, green: 139/255, blue: 148/255, opacity: 1) // #898B94 — neutral cool gray
+        static let simd         = Color(.sRGB, red: 181/255, green: 169/255, blue: 154/255, opacity: 1) // #B5A99A — warm graphite (distinct from vDSP)
     }
 
     /// Verification + flag colors. Matched chroma ~0.16 — a `.pass` pill
     /// and a `.fail` pill feel equally weighted, the difference is hue.
     enum Status {
-        static let pass     = Color(red:  94/255, green: 204/255, blue: 133/255) // #5ECC85
-        static let fail     = Color(red: 224/255, green: 120/255, blue:  83/255) // #E07853
-        static let warn     = Color(red: 220/255, green: 173/255, blue:  77/255) // #DCAD4D
-        static let info     = Color(red: 108/255, green: 168/255, blue: 215/255) // #6CA8D7
+        static let pass     = Color(.sRGB, red:  94/255, green: 204/255, blue: 133/255, opacity: 1) // #5ECC85
+        static let fail     = Color(.sRGB, red: 224/255, green: 120/255, blue:  83/255, opacity: 1) // #E07853
+        static let warn     = Color(.sRGB, red: 220/255, green: 173/255, blue:  77/255, opacity: 1) // #DCAD4D
+        static let info     = Color(.sRGB, red: 108/255, green: 168/255, blue: 215/255, opacity: 1) // #6CA8D7
     }
 
     /// Soft VectorCore tint — used for selected-row highlights, accent pill
     /// backgrounds, and the "feasible region" fill below Roofline ceilings.
-    static let accentSoft   = Color(red:   0/255, green: 201/255, blue: 211/255).opacity(0.18)
+    static let accentSoft   = Color(.sRGB, red: 0/255, green: 201/255, blue: 211/255, opacity: 0.18)
 }
