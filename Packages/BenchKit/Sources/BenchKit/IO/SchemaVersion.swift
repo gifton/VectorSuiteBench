@@ -21,7 +21,10 @@ public struct SchemaVersion: Codable, Hashable, Sendable, Comparable, CustomStri
     ///   additive enum cases with stable wire-names; older readers will
     ///   throw `DecodingError` on encountering these — by design, since the
     ///   migration path is "upgrade BenchKit," not silent value coercion).
-    public static let current = SchemaVersion(major: 1, minor: 1)
+    /// - 1.2 — Phase 2.1 added `RunMetadata.wallTimeNanos` and
+    ///   `RunSummary.wallTimeNanos`. Both are optional, so 1.1 documents
+    ///   decode cleanly with `nil`; no migration entry required.
+    public static let current = SchemaVersion(major: 1, minor: 2)
 
     public var description: String { "\(major).\(minor)" }
 

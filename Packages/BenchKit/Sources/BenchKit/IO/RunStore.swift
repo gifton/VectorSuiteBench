@@ -105,13 +105,32 @@ public final class RunStore: Sendable {
     /// Finalize a run: load all case files, assemble the `RunDocument`,
     /// write the per-run `samples.csv` rollup, and update `index.json` with
     /// this run's summary.
+    ///
+    /// Pass `wallTimeNanos` to stamp the elapsed queue duration into the
+    /// metadata. When non-nil, the on-disk manifest is rewritten with the
+    /// patched value so subsequent `loadRun` calls see the same metadata
+    /// as the returned document. `nil` leaves the field as written at
+    /// `beginRun` (also `nil`) — used by callers that don't track wall time
+    /// (legacy tests, for now).
     @discardableResult
-    public func finalizeRun(runID: String) throws -> RunDocument {
+    public func finalizeRun(runID: String, wallTimeNanos: UInt64? = nil) throws -> RunDocument {
         let manifest = try readJSON(ManifestPayload.self, at: manifestURL(for: runID))
+        let metadata: RunMetadata
+        if let wallTimeNanos {
+            metadata = manifest.runMetadata.withWallTime(wallTimeNanos)
+            // Rewrite manifest.json so on-disk state matches the returned
+            // document. Without this, a subsequent loadRun would return the
+            // un-stamped metadata, diverging from the document we just
+            // emitted (and from the index summary written below).
+            let patched = ManifestPayload(schemaVersion: .current, runMetadata: metadata)
+            try writeAtomic(patched, to: manifestURL(for: runID))
+        } else {
+            metadata = manifest.runMetadata
+        }
         let cases = try loadCases(for: runID)
         let document = RunDocument(
             schemaVersion: .current,
-            runMetadata: manifest.runMetadata,
+            runMetadata: metadata,
             cases: cases
         )
         try CSVExporter.write(document, to: samplesCSVURL(for: runID))
@@ -177,7 +196,8 @@ public final class RunStore: Sendable {
             caseCount: doc.cases.count,
             completedCaseCount: doc.cases.filter { !$0.flags.contains(.truncated) }.count,
             hardwareFingerprint: doc.runMetadata.hardware.fingerprint,
-            thermalEscalations: doc.cases.reduce(0) { $0 + $1.thermalEvents.count }
+            thermalEscalations: doc.cases.reduce(0) { $0 + $1.thermalEvents.count },
+            wallTimeNanos: doc.runMetadata.wallTimeNanos
         )
         // Replace existing entry for the same runID if present.
         index.runs.removeAll { $0.runID == summary.runID }
@@ -249,6 +269,11 @@ public struct RunSummary: Codable, Sendable {
     public let hardwareFingerprint: String
     public let thermalEscalations: Int
 
+    /// Wall-clock duration of the case-execution queue, in nanoseconds.
+    /// Mirrors `RunMetadata.wallTimeNanos`. `nil` for pre-1.2 runs and for
+    /// runs finalized without a wall-time stamp. Schema 1.2+.
+    public let wallTimeNanos: UInt64?
+
     public init(
         runID: String,
         timestamp: Date,
@@ -258,7 +283,8 @@ public struct RunSummary: Codable, Sendable {
         caseCount: Int,
         completedCaseCount: Int,
         hardwareFingerprint: String,
-        thermalEscalations: Int
+        thermalEscalations: Int,
+        wallTimeNanos: UInt64? = nil
     ) {
         self.runID = runID
         self.timestamp = timestamp
@@ -269,5 +295,6 @@ public struct RunSummary: Codable, Sendable {
         self.completedCaseCount = completedCaseCount
         self.hardwareFingerprint = hardwareFingerprint
         self.thermalEscalations = thermalEscalations
+        self.wallTimeNanos = wallTimeNanos
     }
 }

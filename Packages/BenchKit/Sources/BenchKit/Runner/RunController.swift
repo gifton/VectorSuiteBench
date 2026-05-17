@@ -134,9 +134,15 @@ public struct RunController: Sendable {
             )
             try store.writeCase(result)
         }
+        let queueEndTicks = clock.now()
+        let wallTimeNanos = clock.nanos(queueEndTicks &- queueStartTicks)
 
-        // 6. Finalize: assemble RunDocument + update index.json.
-        return try store.finalizeRun(runID: runID)
+        // 6. Finalize: assemble RunDocument + update index.json. Wall time
+        //    covers the case-execution queue only — pre-queue setup (peak
+        //    measurement, harness self-bench) is not user-visible work and
+        //    would muddy the sidebar's "how long did the benchmarks take"
+        //    reading.
+        return try store.finalizeRun(runID: runID, wallTimeNanos: wallTimeNanos)
     }
 
     // MARK: - Helpers

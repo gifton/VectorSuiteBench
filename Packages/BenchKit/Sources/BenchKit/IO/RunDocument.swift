@@ -38,6 +38,11 @@ public struct RunMetadata: Codable, Sendable {
     public let harnessOverheadNanos: Double?
     public let seedTableVersion: Int
 
+    /// Wall-clock duration of the case-execution queue, in nanoseconds.
+    /// `nil` while the run is in-flight; populated by `RunStore.finalizeRun`
+    /// from the queue's start/end clock ticks. Schema 1.2+.
+    public let wallTimeNanos: UInt64?
+
     public init(
         runID: String,
         timestamp: Date,
@@ -50,7 +55,8 @@ public struct RunMetadata: Codable, Sendable {
         lowPowerModeEnabled: Bool,
         timerOverheadNanos: Double,
         harnessOverheadNanos: Double?,
-        seedTableVersion: Int
+        seedTableVersion: Int,
+        wallTimeNanos: UInt64? = nil
     ) {
         self.runID = runID
         self.timestamp = timestamp
@@ -64,5 +70,27 @@ public struct RunMetadata: Codable, Sendable {
         self.timerOverheadNanos = timerOverheadNanos
         self.harnessOverheadNanos = harnessOverheadNanos
         self.seedTableVersion = seedTableVersion
+        self.wallTimeNanos = wallTimeNanos
+    }
+
+    /// Returns a copy with `wallTimeNanos` set. Used by `RunStore.finalizeRun`
+    /// to stamp the elapsed queue time into the manifest that was originally
+    /// written before the queue ran.
+    public func withWallTime(_ nanos: UInt64) -> RunMetadata {
+        RunMetadata(
+            runID: runID,
+            timestamp: timestamp,
+            preset: preset,
+            git: git,
+            build: build,
+            hardware: hardware,
+            linkedLibraryVersions: linkedLibraryVersions,
+            fpcrAtStart: fpcrAtStart,
+            lowPowerModeEnabled: lowPowerModeEnabled,
+            timerOverheadNanos: timerOverheadNanos,
+            harnessOverheadNanos: harnessOverheadNanos,
+            seedTableVersion: seedTableVersion,
+            wallTimeNanos: nanos
+        )
     }
 }

@@ -61,6 +61,74 @@ struct RunStoreTests {
         }
     }
 
+    @Test("wallTimeNanos round-trips through manifest, document, and index (schema 1.2)")
+    func wallTimeRoundTrip() throws {
+        let tmp = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = RunStore(rootURL: tmp)
+
+        let metadata = makeMetadata(runID: "wall-time-1")
+        try store.beginRun(metadata: metadata)
+        try store.writeCase(makeCaseResult(runID: metadata.runID))
+
+        let stamped: UInt64 = 12_345_678_900
+        let doc = try store.finalizeRun(runID: metadata.runID, wallTimeNanos: stamped)
+        #expect(doc.runMetadata.wallTimeNanos == stamped)
+
+        // Manifest on disk reflects the stamp — loadRun returns the
+        // patched value, not the pre-queue nil.
+        let reloaded = try store.loadRun(runID: metadata.runID)
+        #expect(reloaded.runMetadata.wallTimeNanos == stamped)
+
+        // Index summary mirrors the metadata.
+        let index = try store.loadIndex()
+        let summary = try #require(index.runs.first { $0.runID == metadata.runID })
+        #expect(summary.wallTimeNanos == stamped)
+    }
+
+    @Test("finalizeRun without wallTimeNanos leaves the field nil")
+    func wallTimeOptionalDefault() throws {
+        let tmp = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = RunStore(rootURL: tmp)
+
+        let metadata = makeMetadata(runID: "wall-time-nil")
+        try store.beginRun(metadata: metadata)
+        try store.writeCase(makeCaseResult(runID: metadata.runID))
+        let doc = try store.finalizeRun(runID: metadata.runID)
+        #expect(doc.runMetadata.wallTimeNanos == nil)
+
+        let index = try store.loadIndex()
+        let summary = try #require(index.runs.first { $0.runID == metadata.runID })
+        #expect(summary.wallTimeNanos == nil)
+    }
+
+    @Test("RunSummary decodes cleanly from pre-1.2 JSON (no wallTimeNanos key)")
+    func runSummaryBackwardCompat() throws {
+        // Pre-1.2 wire shape: no wallTimeNanos field. Optional Codable
+        // fields decode `nil` for missing keys — assert that explicitly so
+        // a future @Codable refactor that breaks this guarantee fails loudly.
+        let json = #"""
+        {
+          "runID": "legacy",
+          "timestamp": "2025-01-01T00:00:00Z",
+          "gitSha": "deadbee",
+          "branch": "main",
+          "preset": "smoke",
+          "caseCount": 1,
+          "completedCaseCount": 1,
+          "hardwareFingerprint": "test",
+          "thermalEscalations": 0
+        }
+        """#
+        let data = json.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let summary = try decoder.decode(RunSummary.self, from: data)
+        #expect(summary.wallTimeNanos == nil)
+        #expect(summary.runID == "legacy")
+    }
+
     // MARK: - Fixtures
 
     private func makeTempDir() throws -> URL {
