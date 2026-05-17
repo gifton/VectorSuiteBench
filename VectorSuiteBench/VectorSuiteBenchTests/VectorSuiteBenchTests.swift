@@ -2,37 +2,14 @@
 //  VectorSuiteBenchTests.swift
 //  VectorSuiteBenchTests
 //
-//  Created by Gifton Okoronkwo on 5/10/26.
+//  Module placeholder retained from the Xcode template scaffold so the
+//  test target has a stable file reference. Real tests live alongside
+//  the code they cover:
 //
-
-import XCTest
-@testable import VectorSuiteBench
-
-final class VectorSuiteBenchTests: XCTestCase {
-
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
-    }
-
-    func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // Any test you write for XCTest can be annotated as throws and async.
-        // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
-        // Mark your test async to allow awaiting for asynchronous code to complete. Check the results with assertions afterwards.
-        // XCTest Documentation
-        // https://developer.apple.com/documentation/xctest
-    }
-
-    func testPerformanceExample() throws {
-        // This is an example of a performance test case.
-        self.measure {
-            // Put the code you want to measure the time of here.
-        }
-    }
-
-}
+//    - DeltaGlyphTests.swift             — Item 0 (DeltaPolarity, NumberCell.sanitize)
+//    - RunStoreCoordinatorTests.swift    — Item 1c (data spine)
+//    - RunProgressTests.swift            — Item 1c (data spine)
+//
+//  When you're confident no scheme / pbxproj entry references this file
+//  by name, safe to delete.
+//
