@@ -153,17 +153,17 @@ private enum StubKind {
 
 private func stubMeasure(kind: StubKind) -> CalibrationStatus.Measure {
     return { hardware, _, emit in
-        emit("Checking peaks cache for \(hardware.fingerprint)…")
-        emit("No cached peaks — running stubbed measurement (preview only).")
-        emit("Measuring single-P-core FMA throughput…")
+        await emit("Checking peaks cache for \(hardware.fingerprint)…")
+        await emit("No cached peaks — running stubbed measurement (preview only).")
+        await emit("Measuring single-P-core FMA throughput…")
         switch kind {
         case .completes(let delay):
             try await Task.sleep(for: delay / 4)
-            emit("Peak compute: 384.2 GFLOPS (fake).")
-            emit("Measuring memory bandwidth (STREAM-triad)…")
+            await emit("Peak compute: 384.2 GFLOPS (fake).")
+            await emit("Measuring memory bandwidth (STREAM-triad)…")
             try await Task.sleep(for: delay / 2)
-            emit("Peak bandwidth: 312.5 GB/s (fake).")
-            emit("Calibration complete.")
+            await emit("Peak bandwidth: 312.5 GB/s (fake).")
+            await emit("Calibration complete.")
             return PeakRecord(
                 schemaVersion: .current,
                 hardwareFingerprint: hardware.fingerprint,
@@ -174,7 +174,7 @@ private func stubMeasure(kind: StubKind) -> CalibrationStatus.Measure {
             )
         case .fails(let delay, let message):
             try await Task.sleep(for: delay / 2)
-            emit("Stage failed.")
+            await emit("Stage failed.")
             struct StubError: LocalizedError {
                 let message: String
                 var errorDescription: String? { message }

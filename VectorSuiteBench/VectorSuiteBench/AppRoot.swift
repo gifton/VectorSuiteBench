@@ -54,7 +54,7 @@ struct AppRoot: View {
     @ViewBuilder
     private var detailPane: some View {
         if coordinator.peaksExist(for: hardware) {
-            detailPlaceholder
+            runDetailOrHint
         } else {
             FirstLaunchView(
                 hardware: hardware,
@@ -64,29 +64,27 @@ struct AppRoot: View {
         }
     }
 
-    // MARK: - Placeholder UI (replaced in Item 3a)
+    // MARK: - Run-detail routing
 
-    private var detailPlaceholder: some View {
-        VStack(spacing: 12) {
-            Text("Detail").vsbCaption()
-            Spacer()
-            if let id = selectedRunID {
-                VStack(spacing: 6) {
-                    Text("Selected run").vsbCaption(color: VSB.Text.md)
-                    Text(id).vsbMonoSha(color: VSB.Text.hi)
-                    if let doc = try? coordinator.loadRun(id: id) {
-                        Text("\(doc.cases.count) case\(doc.cases.count == 1 ? "" : "s")")
-                            .vsbBody(color: VSB.Text.md)
-                    }
-                }
-            } else {
+    /// Shown when peaks exist and a sidebar row is selected. The "no
+    /// selection" hint is the empty state before any row is clicked;
+    /// `RunDetailView` is the real surface from Item 3a onward.
+    @ViewBuilder
+    private var runDetailOrHint: some View {
+        if let id = selectedRunID {
+            RunDetailView(runID: id, coordinator: coordinator)
+        } else {
+            VStack(spacing: 8) {
                 Text("Select a run").vsbBody(color: VSB.Text.md)
+                Text("Pick a row from the sidebar to inspect its summary, table, and charts.")
+                    .vsbMonoSha()
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 480)
             }
-            Spacer()
+            .padding(40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(VSB.Surface.bg)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(VSB.Surface.bg)
     }
 }
 

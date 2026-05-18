@@ -19,7 +19,13 @@ import BenchKit
 ///
 /// `now` and `calendar` are explicit parameters so tests can pin the clock
 /// and the locale without monkeying with `Calendar.current` or `Date()`.
-enum RunSummaryGrouping {
+///
+/// **`nonisolated`** — the app target's
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` would otherwise pin every
+/// function below to MainActor, which means calls from a nonisolated test
+/// suite emit Swift 6 warnings (and future errors). These functions are
+/// pure values-in / value-out; no MainActor reason to inherit isolation.
+nonisolated enum RunSummaryGrouping {
 
     /// Section bucket identifier. The header label is computed via
     /// `formatSectionHeader(for:now:calendar:)`, not stored here — keeps the

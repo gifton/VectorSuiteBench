@@ -14,12 +14,12 @@ phase is now UI implementation against a locked design doc.
 
 - Repo: /Users/goftin/dev/gsuite/VectorSuiteBench · main · push authorized
 - GitHub: gifton/VectorSuiteBench
-- Last commit (after Item 5): see `git log -1 --oneline`
-- Tests: ~134 total. ~42 in the Xcode app target (DeltaGlyphTests,
+- Last commit (after Item 3a): see `git log -1 --oneline`
+- Tests: ~154 total. ~63 in the Xcode app target (DeltaGlyphTests,
   NumberCellSanitizeTests, RunStoreCoordinatorTests, RunProgressTests,
-  RunSummaryGroupingTests, CalibrationStatusTests — +8 from Item 5),
-  plus 91 across the BenchKit/VSBCore/VSBRun SwiftPM packages
-  (BenchKit 71 with PeakMeasurement.writeCached round-trip test).
+  RunSummaryGroupingTests, CalibrationStatusTests,
+  RunSummaryFormattersTests — +21 from Item 3a's pure-function tests),
+  plus 91 across the BenchKit/VSBCore/VSBRun SwiftPM packages.
 - SchemaVersion is 1.2. `RunMetadata.wallTimeNanos: UInt64?` and
   `RunSummary.wallTimeNanos: UInt64?` are populated by
   `RunController.run()` from the queue's start/end clock ticks.
@@ -37,12 +37,13 @@ phase is now UI implementation against a locked design doc.
   manual "Add Files to Target" passes required** for files dropped into
   those existing trees. New top-level folders may still need wiring;
   add via Xcode if a new tree is needed.
-- Items DONE (8 → 3 remaining): 0 (design system), 1a (strip SwiftData
-  template), 1c (data spine), 2.0 (schema bump for wallTimeNanos),
-  2 (RunListSidebar + grouping + ThrottleDot), 5.0 (PeakMeasurement
-  .writeCached), 5 (FirstLaunchView + CalibrationStatus +
-  CalibrationStatusFeed + AppRoot routing).
-  Remaining: 3a, 3b, 3c, 3d, 4a, 4b, 4c.
+- Items DONE: 0 (design system), 1a (strip SwiftData template), 1c
+  (data spine), 2.0 (schema bump for wallTimeNanos), 2 (RunListSidebar
+  + grouping + ThrottleDot), 5.0 (PeakMeasurement.writeCached), 5
+  (FirstLaunchView + CalibrationStatus), 3a (RunSummaryHeader + 7-cell
+  grid + HardwareFingerprintPopover + thermal banner + RunDetailView
+  shell).
+  Remaining: 3b, 3c, 3d, 4a, 4b, 4c.
 - **Known Xcode quirk**: `xcodebuild ... test` fails at the test-target
   link step (unable to find BenchKit symbols). cmd-U from Xcode IDE
   works (presumably via scheme-level framework linking that diverges
@@ -83,55 +84,61 @@ phase is now UI implementation against a locked design doc.
      VectorSuiteBench/VectorSuiteBench/AppRoot.swift  ← placeholder sidebar
                                                        to be replaced.
 
-## Recommended sequence (5 sub-items → close 2.1)
+## Recommended sequence (4 sub-items → close 2.1)
 
-  1. **Item 3a → 3b → 3c → 3d** — detail surface (summary header,
-     case table, throughput chart, diff toolbar placeholder).
+  1. **Item 3b — `CaseTable`** (the materially-useful inflection point
+     per plan §2.5; 8 columns × 6 row treatments).
 
-  2. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
+  2. **Item 3c — ThroughputBarChart + Table ⟷ Charts toggle.**
 
-## First concrete task: Item 3a — Run-summary header
+  3. **Item 3d — Diff toolbar placeholder.**
 
-Replace `AppRoot`'s `detailPlaceholder` with a real header view per
-design doc §04 (Run Summary header) + §07 (thermal-throttle banner
-edge case).
+  4. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
 
-Design doc highlights:
-- 7-cell info grid spanning the top of the detail pane. Each cell:
-  one line of label (caption), one line of value (mono, tabular),
-  one line of context (mono, lo-color). Cell borders are 1px hair
-  lines so the grid reads as one structure.
-- When `thermalEscalations > 0`: a warn-tinted **non-dismissable
-  banner** sits above the grid explaining when/how many events
-  occurred.
-- Hardware cell opens an `NSPopover` (locked decision §1.5/5) with
-  full chip details (cluster sizes, base/boost clocks, memory
-  channels). The headline shows just "M3 Max · 14C / 30G".
-- Body below the header reads "Coming next" until Item 3b lands the
-  CaseTable.
+## First concrete task: Item 3b — `CaseTable` (the data table)
+
+Drop the "Coming next" placeholder from `RunDetailView.bodyPlaceholder`
+and replace with a native macOS `Table` showing every case in the
+loaded `RunDocument`. Plan §2.5 calls this **"the first moment the app
+is materially useful"** — it turns the detail pane from a triaged
+summary into the surface a perf engineer scans on every run.
+
+Design doc §04 / "Data Table" specs 8 columns:
+
+1. **Operation** — SF Pro 600, `dot ƒ32` (kernel + dtype suffix).
+2. **Implementation** — 10×10 swatch + library name + optional APPROX
+   pill. Hatched swatch + dashed border for `.approximate` impls.
+3. **Mode · Size** — `SHOT` / `LOOP` capsule + mono `n=1024`.
+4. **Median ns** — SF Mono tabular right-aligned. VectorCore rows
+   render the number in the accent hue (locked design principle P-02).
+5. **P99 ns** — same.
+6. **P999 ns** — same. **NO MEAN COLUMN EVER** (spec §6).
+7. **GFLOP/s · GB/s** — same numeric system. VectorCore rows colored.
+8. **Status** — VerificationDot + flag pill(s) (`⌇ BIMODAL`, `⏱ TRUNC`,
+   `~ APPROX`) + optional note (`ε ≤ 2⁻¹⁵`, `ulp>1024`).
+
+Row-level integrity treatments (6 distinct visual states — see plan
+§2 for the full list):
+- VERIFIED, FAILED, UNVERIFIABLE, BIMODAL, TRUNC, APPROX, in-flight.
+
+Locked decisions §1.5 in play:
+- §1.5/2 — mode pill stays in every row (no "filter at top"
+  alternative).
+- §1.5/3 — approximate rows interleaved with the exact counterpart,
+  not grouped at the bottom.
 
 Files to create:
-- `VectorSuiteBench/VectorSuiteBench/Views/RunSummaryHeader.swift` —
-  the 7-cell info grid.
-- `VectorSuiteBench/VectorSuiteBench/Views/ThermalBanner.swift` — the
-  warn-tinted banner.
-- `VectorSuiteBench/VectorSuiteBench/Views/HardwareDetailPopover.swift`
-  — the NSPopover content for the hardware cell.
-- `VectorSuiteBench/VectorSuiteBench/Views/RunDetailView.swift` — host
-  view that loads a `RunDocument` from the coordinator and composes
-  the header + banner + placeholder body.
+- `Views/CaseTable.swift` — the native `Table` with 8 columns and 6
+  row treatments.
+- `Models/CaseTableFilter.swift` — `@Observable` filter (op + impl +
+  verification + mode pickers). Will be **shared with Item 3c's
+  chart** so both surfaces read the same filtered case list.
 
 Tests:
-- `RunSummaryHeaderFormattingTests` — pure-function formatters for the
-  7 cells (preset, time, hardware fingerprint, swift/build, thermal
-  summary, harness floor, schema version).
+- `CaseTableFilterTests` — apply each filter axis to a synthetic
+  registry, verify the resulting case list shape.
 
-Wiring:
-- AppRoot's `detailPlaceholder` becomes `RunDetailView(selection:)`
-  conditional on `selectedRunID != nil`. When nil, show a "Select a
-  run" placeholder.
-
-Target tests after Item 3a: ~140 total (134 + ~6 new).
+Target tests after Item 3b: ~162 total (154 + ~8 new).
 
 ## Conventions (don't violate)
 
