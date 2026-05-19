@@ -14,11 +14,12 @@ phase is now UI implementation against a locked design doc.
 
 - Repo: /Users/goftin/dev/gsuite/VectorSuiteBench · main · push authorized
 - GitHub: gifton/VectorSuiteBench
-- Last commit (after Item 3a): see `git log -1 --oneline`
-- Tests: ~154 total. ~63 in the Xcode app target (DeltaGlyphTests,
+- Last commit (after Item 3b): see `git log -1 --oneline`
+- Tests: ~169 total. ~78 in the Xcode app target (DeltaGlyphTests,
   NumberCellSanitizeTests, RunStoreCoordinatorTests, RunProgressTests,
   RunSummaryGroupingTests, CalibrationStatusTests,
-  RunSummaryFormattersTests — +21 from Item 3a's pure-function tests),
+  RunSummaryFormattersTests, **CaseTableFilterTests** — +15 from
+  Item 3b's row-builder + filter tests),
   plus 91 across the BenchKit/VSBCore/VSBRun SwiftPM packages.
 - SchemaVersion is 1.2. `RunMetadata.wallTimeNanos: UInt64?` and
   `RunSummary.wallTimeNanos: UInt64?` are populated by
@@ -42,8 +43,9 @@ phase is now UI implementation against a locked design doc.
   + grouping + ThrottleDot), 5.0 (PeakMeasurement.writeCached), 5
   (FirstLaunchView + CalibrationStatus), 3a (RunSummaryHeader + 7-cell
   grid + HardwareFingerprintPopover + thermal banner + RunDetailView
-  shell).
-  Remaining: 3b, 3c, 3d, 4a, 4b, 4c.
+  shell), **3b** (CaseTable — 8-column data table with 6 row treatments
+  + CaseRowBuilder + CaseTableFilter shared with 3c).
+  Remaining: 3c, 3d, 4a, 4b, 4c.
 - **Known Xcode quirk**: `xcodebuild ... test` fails at the test-target
   link step (unable to find BenchKit symbols). cmd-U from Xcode IDE
   works (presumably via scheme-level framework linking that diverges
@@ -84,61 +86,43 @@ phase is now UI implementation against a locked design doc.
      VectorSuiteBench/VectorSuiteBench/AppRoot.swift  ← placeholder sidebar
                                                        to be replaced.
 
-## Recommended sequence (4 sub-items → close 2.1)
+## Recommended sequence (3 sub-items → close 2.1)
 
-  1. **Item 3b — `CaseTable`** (the materially-useful inflection point
-     per plan §2.5; 8 columns × 6 row treatments).
+  1. **Item 3c — ThroughputBarChart + Table ⟷ Charts toggle.** Reuses
+     the `CaseTableFilter` shipped in 3b; pass the same instance into
+     both surfaces so they share cohort state.
 
-  2. **Item 3c — ThroughputBarChart + Table ⟷ Charts toggle.**
+  2. **Item 3d — Diff toolbar placeholder.**
 
-  3. **Item 3d — Diff toolbar placeholder.**
+  3. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
 
-  4. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
+## First concrete task: Item 3c — `ThroughputBarChart` + Table ⟷ Charts toggle
 
-## First concrete task: Item 3b — `CaseTable` (the data table)
+Item 3b shipped `CaseTableFilter` as a `@MainActor @Observable final class`
+at `VectorSuiteBench/Models/CaseTableFilter.swift`. **Reuse it.** Pass the
+same `CaseTableFilter` instance into both the `CaseTable` (already wired
+in `RunDetailView`) and the new `ThroughputBarChart`; both consumers
+observe its state. The chart's op + impl chip filter row writes to the
+filter's `ops` / `impls` axes — the same toggles the (future) table
+filter chips will also write to.
 
-Drop the "Coming next" placeholder from `RunDetailView.bodyPlaceholder`
-and replace with a native macOS `Table` showing every case in the
-loaded `RunDocument`. Plan §2.5 calls this **"the first moment the app
-is materially useful"** — it turns the detail pane from a triaged
-summary into the surface a perf engineer scans on every run.
+Build `Views/ThroughputBarChart.swift` (Swift Charts `BarMark` grouped
+by op, colored by impl). Approximate impls render hatched + dashed via
+the existing `HatchedFillModifier`. Mode pill stays in the chart
+header (§1.5/2). Wire the Table ⟷ Charts segmented control in
+`RunDetailView` so the body swaps between `CaseTable` and the chart.
 
-Design doc §04 / "Data Table" specs 8 columns:
-
-1. **Operation** — SF Pro 600, `dot ƒ32` (kernel + dtype suffix).
-2. **Implementation** — 10×10 swatch + library name + optional APPROX
-   pill. Hatched swatch + dashed border for `.approximate` impls.
-3. **Mode · Size** — `SHOT` / `LOOP` capsule + mono `n=1024`.
-4. **Median ns** — SF Mono tabular right-aligned. VectorCore rows
-   render the number in the accent hue (locked design principle P-02).
-5. **P99 ns** — same.
-6. **P999 ns** — same. **NO MEAN COLUMN EVER** (spec §6).
-7. **GFLOP/s · GB/s** — same numeric system. VectorCore rows colored.
-8. **Status** — VerificationDot + flag pill(s) (`⌇ BIMODAL`, `⏱ TRUNC`,
-   `~ APPROX`) + optional note (`ε ≤ 2⁻¹⁵`, `ulp>1024`).
-
-Row-level integrity treatments (6 distinct visual states — see plan
-§2 for the full list):
-- VERIFIED, FAILED, UNVERIFIABLE, BIMODAL, TRUNC, APPROX, in-flight.
-
-Locked decisions §1.5 in play:
-- §1.5/2 — mode pill stays in every row (no "filter at top"
-  alternative).
-- §1.5/3 — approximate rows interleaved with the exact counterpart,
-  not grouped at the bottom.
+The four remaining chart slots (LatencyHistogram, LatencyPercentile,
+Roofline, MemoryPressure) render placeholders that read "Coming in
+2.3" — design doc §06.
 
 Files to create:
-- `Views/CaseTable.swift` — the native `Table` with 8 columns and 6
-  row treatments.
-- `Models/CaseTableFilter.swift` — `@Observable` filter (op + impl +
-  verification + mode pickers). Will be **shared with Item 3c's
-  chart** so both surfaces read the same filtered case list.
+- `Views/ThroughputBarChart.swift`
+- `Charts/ChartDataBuilder.swift` — pure `[CaseRow] → [ChartSeries]`
+  builder (reuses the same row list the table consumes).
+- `Tests/ChartDataBuilderTests.swift`
 
-Tests:
-- `CaseTableFilterTests` — apply each filter axis to a synthetic
-  registry, verify the resulting case list shape.
-
-Target tests after Item 3b: ~162 total (154 + ~8 new).
+Target tests after Item 3c: ~177 total (169 + ~8 new).
 
 ## Conventions (don't violate)
 
@@ -188,13 +172,12 @@ Target tests after Item 3b: ~162 total (154 + ~8 new).
 
 ## Begin
 
-1. Read docs/phase-2.1-plan.md §1.5, §2 (Items 2 + 5 in particular),
-   §2.5, §5, §6.
-2. Read docs/design/phase-2.1-design.html sections 04 (Main Window) and
-   07 (Edge cases — for the throttle state).
-3. Skim VectorSuiteBench/VectorSuiteBench/AppRoot.swift to see what the
-   placeholder sidebar looks like today.
-4. Start with Item 2 (RunListSidebar) → commit → push.
+1. Read docs/phase-2.1-plan.md §1.5, §2 Item 3c, §2.5, §5, §6.
+2. Read docs/design/phase-2.1-design.html sections 04 (Main Window /
+   Data Table) and 06 (Chart compositions — ThroughputBarChart spec).
+3. Skim VectorSuiteBench/VectorSuiteBench/Models/CaseTableFilter.swift
+   and Views/CaseTable.swift to see the shared filter contract.
+4. Start with Item 3c (ThroughputBarChart + toggle) → commit → push.
 
 If anything reads ambiguous, stop and ask — the locked decisions are
 NOT ambiguous, but the design doc is silent on a few sub-decisions

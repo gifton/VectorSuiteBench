@@ -28,6 +28,13 @@ struct RunDetailView: View {
     @State private var document: RunDocument?
     @State private var loadError: String?
 
+    /// Filter state shared with Item 3c's chart. Owned by `RunDetailView`
+    /// so swapping runs resets the filter — a filter that survived run
+    /// changes would silently drop rows when the user clicks a different
+    /// run that doesn't contain the previously-selected impl, which reads
+    /// as "the table is broken".
+    @State private var filter = CaseTableFilter()
+
     init(runID: String, coordinator: RunStoreCoordinator, now: Date = Date()) {
         self.runID = runID
         self.coordinator = coordinator
@@ -58,18 +65,12 @@ struct RunDetailView: View {
     private func content(document: RunDocument) -> some View {
         VStack(spacing: 0) {
             RunSummaryHeader(document: document, now: now)
-            bodyPlaceholder
+            CaseTable(
+                runID: document.runMetadata.runID,
+                cases: document.cases,
+                filter: filter
+            )
         }
-    }
-
-    private var bodyPlaceholder: some View {
-        VStack(spacing: 8) {
-            Spacer()
-            Text("Data table").vsbCaption()
-            Text("Coming next").vsbBody(color: VSB.Text.md)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func errorBlock(message: String) -> some View {

@@ -54,7 +54,13 @@ struct VerificationDot: View {
     }
 }
 
-enum VerificationDisplayState: Hashable, Sendable {
+/// **`nonisolated`** — the app target's
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` would otherwise pin this
+/// enum's auto-synthesized `Hashable`/`Equatable` conformances to
+/// MainActor. Code that filters `Set<VerificationDisplayState>` from a
+/// nonisolated context (the `CaseTableFilterLogic` pure-function path)
+/// would emit Swift 6 warnings. Pure value enum; no MainActor reason.
+nonisolated enum VerificationDisplayState: Hashable, Sendable {
     case verified
     case unverifiable
     case failed
@@ -62,7 +68,11 @@ enum VerificationDisplayState: Hashable, Sendable {
     /// row treatment in the data table.
     case inflight
 
-    var color: Color {
+    /// MainActor-isolated because it reads `VSB.Status.*` tokens. The
+    /// enum itself stays `nonisolated` so its `Hashable`/`Equatable`
+    /// conformances are usable from nonisolated test contexts — only
+    /// these two view-only accessors carry MainActor.
+    @MainActor var color: Color {
         switch self {
         case .verified:     return VSB.Status.pass
         case .unverifiable: return VSB.Status.warn
@@ -72,7 +82,7 @@ enum VerificationDisplayState: Hashable, Sendable {
     }
 
     /// VoiceOver / Voice Control label. Spoken text, not visible.
-    var accessibilityLabel: Text {
+    @MainActor var accessibilityLabel: Text {
         switch self {
         case .verified:     return Text("verified")
         case .unverifiable: return Text("unverifiable")
