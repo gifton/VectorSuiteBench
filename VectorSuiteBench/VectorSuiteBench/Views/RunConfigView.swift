@@ -26,6 +26,12 @@ struct RunConfigView: View {
 
     @State private var config = RunConfig()
 
+    /// Orchestrator for the run itself. Provided by `AppRoot` so the
+    /// sheet's lifetime doesn't interfere with the run's lifetime —
+    /// dismissing the sheet on Start (the standard pattern) doesn't
+    /// stop the benchmark.
+    let invocation: RunInvocation
+
     /// Native SwiftUI dismissal. Replaces an earlier `onDismiss` closure
     /// parameter — `.dismiss` is the macOS-idiomatic path and it covers
     /// the three dismissal triggers (Cancel button, Escape key,
@@ -413,12 +419,16 @@ struct RunConfigView: View {
         Text("·").vsbMonoSha()
     }
 
-    /// `Start ⌘↵` — emphasized primary per design doc, disabled in 4a
-    /// since the action wires up in 4c. Native macOS prominent button
-    /// style gives us the cyan glow effect automatically.
+    /// `Start ⌘↵` — emphasized primary per design doc. Wired in
+    /// Item 4c: tap → `invocation.start(config:)` → sheet dismisses
+    /// → the run executes in the background while the toolbar's
+    /// `LiveStateChip` reflects state and the `+ New Run` button
+    /// swaps to `◼ Cancel`. Disabled while a run is already in
+    /// flight (no concurrent runs).
     private var startButton: some View {
         Button {
-            // Wired in Item 4c — invokes RunController(...).run()
+            invocation.start(config: config)
+            dismiss()
         } label: {
             HStack(spacing: 6) {
                 Text("Start")
@@ -427,8 +437,10 @@ struct RunConfigView: View {
         }
         .keyboardShortcut(.return, modifiers: .command)
         .buttonStyle(.borderedProminent)
-        .disabled(true)
-        .help("Coming in Item 4c — invokes RunController in-process")
+        .disabled(invocation.isRunning)
+        .help(invocation.isRunning
+              ? "A run is already in flight — cancel it before starting another"
+              : "Start the benchmark run (the sheet dismisses; progress shows in the toolbar)")
     }
 }
 
@@ -451,7 +463,3 @@ extension AbortPolicy:     BudgetLabelable {}
 
 // MARK: - Preview
 
-#Preview("RunConfigView — smoke default") {
-    RunConfigView()
-        .background(VSB.Surface.bg)
-}

@@ -29,11 +29,23 @@ struct AppRoot: View {
     @State private var selectedRunID: String? = nil
     @State private var calibration = CalibrationStatus()
     /// New Run sheet presentation flag. Driven by the toolbar's
-    /// `+ New Run` button; `RunConfigView` calls `onDismiss` to flip it
-    /// back. Owned here (not inside `AppToolbar`) because the toolbar
-    /// is `ToolbarContent` and can't host a `.sheet(_:)` modifier.
+    /// `+ New Run` button; `RunConfigView` calls `dismiss()` to flip
+    /// it back. Owned here (not inside `AppToolbar`) because the
+    /// toolbar is `ToolbarContent` and can't host a `.sheet(_:)`
+    /// modifier.
     @State private var isNewRunSheetPresented = false
+    /// In-flight benchmark orchestrator. Shares the coordinator's
+    /// `RunStore` so the run's output lands in the same directory the
+    /// sidebar polls. State drives the toolbar's `LiveStateChip` color
+    /// + the `+ New Run` ↔ `◼ Cancel` button swap.
+    @State private var invocation: RunInvocation
     private let hardware: HardwareInventory = HardwareInventory.probe()
+
+    init() {
+        let coordinator = RunStoreCoordinator.makeDefault()
+        _coordinator = State(initialValue: coordinator)
+        _invocation = State(initialValue: RunInvocation(store: coordinator.store))
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -53,22 +65,25 @@ struct AppRoot: View {
         }
         .environment(coordinator)
         .toolbar {
-            // Window-level chrome (design doc §04 "Toolbar"). `+ New Run`
-            // is wired as of Item 4a; the other three buttons stay
-            // disabled until their phase lands. `.idle` is hard-coded
-            // until Item 4c exposes a `RunProgress` observable.
+            // Window-level chrome (design doc §04 "Toolbar"). `+ New
+            // Run` opens the modal (Item 4a); `◼ Cancel` replaces it
+            // while a run is in flight (Item 4c). `liveState` is now
+            // driven by `RunInvocation` — green idle, blue running,
+            // red on failure.
             AppToolbar(
                 hardware: hardware,
-                liveState: .idle,
-                onNewRun: { isNewRunSheetPresented = true }
+                liveState: invocation.liveState,
+                onNewRun: { isNewRunSheetPresented = true },
+                onCancel: { invocation.cancel() }
             )
         }
         .sheet(isPresented: $isNewRunSheetPresented) {
             // `RunConfigView` dismisses itself via `@Environment(\.dismiss)`,
             // which auto-flips this binding to false through the sheet
-            // presentation mechanism. No explicit `onDismiss` plumbing
-            // required.
-            RunConfigView()
+            // presentation mechanism. The `invocation` argument
+            // outlives the sheet — Start dismisses the sheet but the
+            // run keeps executing under `invocation`'s Task.
+            RunConfigView(invocation: invocation)
         }
     }
 

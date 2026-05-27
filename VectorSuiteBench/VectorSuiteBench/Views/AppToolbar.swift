@@ -32,15 +32,17 @@ struct AppToolbar: ToolbarContent {
 
     let hardware: HardwareInventory
     let liveState: LiveState
-    /// Action for the `+ New Run` button. Wired by `AppRoot` to flip the
-    /// sheet-presented state. Item 4a turned this from a disabled
-    /// placeholder into a real affordance; 4b/4c keep extending the
-    /// sheet's behavior without further toolbar changes.
+    /// Action for the `+ New Run` button. Wired by `AppRoot` to flip
+    /// the sheet-presented state.
     let onNewRun: () -> Void
+    /// Action for the `◼ Cancel` button (replaces `+ New Run` while a
+    /// run is in flight, per locked decision §4c). Wired by `AppRoot`
+    /// to invoke `RunInvocation.cancel()`.
+    let onCancel: () -> Void
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            newRunButton
+            primaryActionButton
             compareButton
             exportButton
             calibrateButton
@@ -50,19 +52,41 @@ struct AppToolbar: ToolbarContent {
         }
     }
 
-    // MARK: - Buttons
+    // MARK: - Primary action (New Run / Cancel swap)
 
-    /// **`+ New Run`** — enabled as of Item 4a: opens the
-    /// `RunConfigView` sheet to configure a benchmark run. The sheet's
-    /// Start button is still disabled in 4a (the actual `RunController`
-    /// invocation lands in 4c), but the modal layout + selection logic
-    /// is fully usable.
+    /// `+ New Run` when idle / failed; `◼ Cancel` when a run is in
+    /// flight (per locked decision §4c — same toolbar position, same
+    /// `⌘.` cancel convention swapping for `⌘N`). The disabled-failed
+    /// state still shows New Run so the user can retry.
+    @ViewBuilder
+    private var primaryActionButton: some View {
+        if liveState == .running {
+            cancelButton
+        } else {
+            newRunButton
+        }
+    }
+
+    /// **`+ New Run`**: opens the `RunConfigView` sheet to configure a
+    /// benchmark run.
     private var newRunButton: some View {
         Button(action: onNewRun) {
             Label("New Run", systemImage: "plus")
         }
         .help("Configure and start a new benchmark run")
         .keyboardShortcut("n", modifiers: .command)
+    }
+
+    /// **`◼ Cancel`**: cooperatively cancels the in-flight run via the
+    /// `CancellationToken` plumbed through `RunInvocation`. Per spec
+    /// §8, a cancelled run produces a valid partial `RunDocument` on
+    /// disk — the sidebar still picks it up.
+    private var cancelButton: some View {
+        Button(action: onCancel) {
+            Label("Cancel", systemImage: "stop.fill")
+        }
+        .help("Cancel the in-flight run (produces a valid partial document on disk)")
+        .keyboardShortcut(".", modifiers: .command)
     }
 
     /// **`⇋ Compare`** — wired in Phase 2.2. Diff two runs side-by-side

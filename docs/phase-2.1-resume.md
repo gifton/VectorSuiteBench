@@ -14,14 +14,11 @@ phase is now UI implementation against a locked design doc.
 
 - Repo: /Users/goftin/dev/gsuite/VectorSuiteBench · main · push authorized
 - GitHub: gifton/VectorSuiteBench
-- Last commit (after Item 4b): see `git log -1 --oneline`
-- Tests: ~218 total. ~127 in the Xcode app target (DeltaGlyphTests,
-  NumberCellSanitizeTests, RunStoreCoordinatorTests, RunProgressTests,
-  RunSummaryGroupingTests, CalibrationStatusTests,
-  RunSummaryFormattersTests, CaseTableFilterTests,
-  ChartDataBuilderTests, RunConfigTests, **RunConfigEstimatorTests**
-  — +18 from Item 4b's pure-function estimator + format-helper
-  tests), plus 91 across the BenchKit/VSBCore/VSBRun SwiftPM packages.
+- Last commit (after Item 4c): see `git log -1 --oneline`
+- Tests: ~222 total. ~131 in the Xcode app target (+ **RunInvocationIntegrationTests**
+  — 4 tests covering the Start path, pre-cancellation, empty-selection
+  guard, and concurrent-start no-op), plus 91 across the
+  BenchKit/VSBCore/VSBRun SwiftPM packages.
 - SchemaVersion is 1.2. `RunMetadata.wallTimeNanos: UInt64?` and
   `RunSummary.wallTimeNanos: UInt64?` are populated by
   `RunController.run()` from the queue's start/end clock ticks.
@@ -58,7 +55,13 @@ phase is now UI implementation against a locked design doc.
   footer: `RunConfigEstimator` with exact case count + uniform-
   per-mode wall + linear bytes; footer renders `342 cases · ~4m 50s
   · ~12 MB JSON` with combined-element a11y label).
-  Remaining: 4c.
+  4b (live-estimate footer: `RunConfigEstimator` ...), **4c**
+  (RunInvocation orchestrator + RunController in-process wiring;
+  Start button enabled; `+ New Run` ↔ `◼ Cancel` toolbar swap;
+  ReleaseGuard errors surface to LiveStateChip as `.failed`; empty-
+  selection produces a `.failed` state with reason; minimum-viable
+  scope — streaming row treatment deferred to 2.2+).
+  **Phase 2.1 is COMPLETE.**
 - **Known Xcode quirk**: `xcodebuild ... test` fails at the test-target
   link step (unable to find BenchKit symbols). cmd-U from Xcode IDE
   works (presumably via scheme-level framework linking that diverges
