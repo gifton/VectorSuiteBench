@@ -35,6 +35,17 @@ struct RunDetailView: View {
     /// as "the table is broken".
     @State private var filter = CaseTableFilter()
 
+    /// Body view mode. Defaults to `.table` per plan §3b — the
+    /// "did my change regress something?" workflow scans the table first.
+    @State private var bodyMode: BodyMode = .table
+
+    /// Built once per `runID` change and held in this view so both the
+    /// table and the chart pane consume the same row list — locked
+    /// cohort seam from Item 3b. The expansion is one-time per run;
+    /// re-running it inside each consumer would duplicate work and risk
+    /// drift if the builder ever became side-effecting.
+    @State private var rows: [CaseRow] = []
+
     init(runID: String, coordinator: RunStoreCoordinator, now: Date = Date()) {
         self.runID = runID
         self.coordinator = coordinator
@@ -65,11 +76,76 @@ struct RunDetailView: View {
     private func content(document: RunDocument) -> some View {
         VStack(spacing: 0) {
             RunSummaryHeader(document: document, now: now)
-            CaseTable(
-                runID: document.runMetadata.runID,
-                cases: document.cases,
-                filter: filter
-            )
+            bodyToggle
+            Divider().background(VSB.Surface.hair)
+            switch bodyMode {
+            case .table:
+                CaseTable(rows: rows, filter: filter)
+            case .charts:
+                ChartsPane(rows: rows, filter: filter)
+            }
+        }
+        .task(id: document.runMetadata.runID) {
+            rows = CaseRowBuilder.build(from: document.cases)
+        }
+    }
+
+    /// Two-position segmented control between the header and the body.
+    /// `Table` default per plan §3b. Sits in its own strip so the
+    /// affordance is visible regardless of which mode the body is in.
+    private var bodyToggle: some View {
+        HStack(spacing: 0) {
+            ForEach(BodyMode.allCases) { mode in
+                Button {
+                    bodyMode = mode
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: mode.iconName)
+                            .imageScale(.small)
+                        Text(mode.label)
+                            .vsbMonoBadge(color: mode == bodyMode ? VSB.Impl.vectorCore : VSB.Text.md)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .foregroundStyle(mode == bodyMode ? VSB.Impl.vectorCore : VSB.Text.md)
+                    .background(mode == bodyMode ? VSB.accentSoft : Color.clear)
+                    .overlay(
+                        Rectangle()
+                            .fill(mode == bodyMode ? VSB.Impl.vectorCore : Color.clear)
+                            .frame(height: 1),
+                        alignment: .bottom
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 6)
+        .background(VSB.Surface.s0)
+    }
+
+    /// Detail-pane body modes. Persisting selection across runs would
+    /// only matter if users care — punt to a future preference if it
+    /// comes up. For now, every run starts in Table mode.
+    private enum BodyMode: String, Identifiable, CaseIterable {
+        case table
+        case charts
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .table:  return "TABLE"
+            case .charts: return "CHARTS"
+            }
+        }
+
+        var iconName: String {
+            switch self {
+            case .table:  return "tablecells"
+            case .charts: return "chart.bar"
+            }
         }
     }
 

@@ -33,13 +33,13 @@ import BenchKit
 /// rows mid-run. No wiring here.
 struct CaseTable: View {
 
-    let runID: String
-    let cases: [CaseResult]
+    /// Pre-built rows. The caller (typically `RunDetailView`) owns the
+    /// `CaseRowBuilder.build(...)` invocation so the same row list can
+    /// feed both this table and `ChartsPane` — the cohort seam locked
+    /// in by Item 3b.
+    let rows: [CaseRow]
     let filter: CaseTableFilter
 
-    /// Built once per `runID` change. Sourced from `CaseRowBuilder` so the
-    /// default ordering interleaves approximate-after-exact per §1.5/3.
-    @State private var allRows: [CaseRow] = []
     @State private var sortOrder: [KeyPathComparator<CaseRow>] = []
 
     var body: some View {
@@ -85,9 +85,6 @@ struct CaseTable: View {
             .width(min: 150, ideal: 200)
         }
         .background(VSB.Surface.bg)
-        .task(id: runID) {
-            allRows = CaseRowBuilder.build(from: cases)
-        }
     }
 
     /// Filtered + sorted rows. Filter applied first (cohort intent); the
@@ -96,7 +93,7 @@ struct CaseTable: View {
     /// stands — that's the ordering that interleaves approximate next to
     /// exact per §1.5/3.
     private var displayed: [CaseRow] {
-        let filtered = filter.apply(to: allRows)
+        let filtered = filter.apply(to: rows)
         return sortOrder.isEmpty ? filtered : filtered.sorted(using: sortOrder)
     }
 }

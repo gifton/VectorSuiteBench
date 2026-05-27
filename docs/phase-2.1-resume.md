@@ -14,12 +14,12 @@ phase is now UI implementation against a locked design doc.
 
 - Repo: /Users/goftin/dev/gsuite/VectorSuiteBench · main · push authorized
 - GitHub: gifton/VectorSuiteBench
-- Last commit (after Item 3b): see `git log -1 --oneline`
-- Tests: ~169 total. ~78 in the Xcode app target (DeltaGlyphTests,
+- Last commit (after Item 3c): see `git log -1 --oneline`
+- Tests: ~180 total. ~89 in the Xcode app target (DeltaGlyphTests,
   NumberCellSanitizeTests, RunStoreCoordinatorTests, RunProgressTests,
   RunSummaryGroupingTests, CalibrationStatusTests,
-  RunSummaryFormattersTests, **CaseTableFilterTests** — +15 from
-  Item 3b's row-builder + filter tests),
+  RunSummaryFormattersTests, CaseTableFilterTests,
+  **ChartDataBuilderTests** — +11 from Item 3c's chart-data tests),
   plus 91 across the BenchKit/VSBCore/VSBRun SwiftPM packages.
 - SchemaVersion is 1.2. `RunMetadata.wallTimeNanos: UInt64?` and
   `RunSummary.wallTimeNanos: UInt64?` are populated by
@@ -43,9 +43,11 @@ phase is now UI implementation against a locked design doc.
   + grouping + ThrottleDot), 5.0 (PeakMeasurement.writeCached), 5
   (FirstLaunchView + CalibrationStatus), 3a (RunSummaryHeader + 7-cell
   grid + HardwareFingerprintPopover + thermal banner + RunDetailView
-  shell), **3b** (CaseTable — 8-column data table with 6 row treatments
-  + CaseRowBuilder + CaseTableFilter shared with 3c).
-  Remaining: 3c, 3d, 4a, 4b, 4c.
+  shell), 3b (CaseTable — 8-column data table with 6 row treatments
+  + CaseRowBuilder + CaseTableFilter shared with 3c), **3c**
+  (ThroughputBarChart + ChartsPane 5-slot picker + Table ⟷ Charts
+  toggle in RunDetailView; chart honors the shared filter).
+  Remaining: 3d, 4a, 4b, 4c.
 - **Known Xcode quirk**: `xcodebuild ... test` fails at the test-target
   link step (unable to find BenchKit symbols). cmd-U from Xcode IDE
   works (presumably via scheme-level framework linking that diverges
@@ -86,43 +88,32 @@ phase is now UI implementation against a locked design doc.
      VectorSuiteBench/VectorSuiteBench/AppRoot.swift  ← placeholder sidebar
                                                        to be replaced.
 
-## Recommended sequence (3 sub-items → close 2.1)
+## Recommended sequence (2 sub-items → close 2.1)
 
-  1. **Item 3c — ThroughputBarChart + Table ⟷ Charts toggle.** Reuses
-     the `CaseTableFilter` shipped in 3b; pass the same instance into
-     both surfaces so they share cohort state.
+  1. **Item 3d — Diff toolbar placeholder.** Small: add the `⇋ Compare`
+     button to the toolbar; mark it disabled with a "Coming in 2.2"
+     tooltip. Reserves chrome real estate per the design doc so 2.2
+     lands without re-shuffling.
 
-  2. **Item 3d — Diff toolbar placeholder.**
+  2. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
 
-  3. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
+## First concrete task: Item 3d — Diff toolbar placeholder
 
-## First concrete task: Item 3c — `ThroughputBarChart` + Table ⟷ Charts toggle
+Tiny scope. Add a `⇋ Compare` button to the run-detail toolbar (or
+window-level toolbar — design doc §04 shows it as window chrome) and
+mark it **disabled** with a "Coming in 2.2" tooltip. Locked decision
+§1.5/4 pins the eventual visual (merged delta table with `▼` / `▲`
+glyphs), but the underlying `BenchKit.RunDiff` is the only piece that
+lights up in 2.2 — 3d just reserves the affordance.
 
-Item 3b shipped `CaseTableFilter` as a `@MainActor @Observable final class`
-at `VectorSuiteBench/Models/CaseTableFilter.swift`. **Reuse it.** Pass the
-same `CaseTableFilter` instance into both the `CaseTable` (already wired
-in `RunDetailView`) and the new `ThroughputBarChart`; both consumers
-observe its state. The chart's op + impl chip filter row writes to the
-filter's `ops` / `impls` axes — the same toggles the (future) table
-filter chips will also write to.
+Files to create/modify:
+- `VectorSuiteBench/AppRoot.swift` or a new `Views/RunDetailToolbar.swift`
+  — adding the disabled `⇋ Compare` button.
 
-Build `Views/ThroughputBarChart.swift` (Swift Charts `BarMark` grouped
-by op, colored by impl). Approximate impls render hatched + dashed via
-the existing `HatchedFillModifier`. Mode pill stays in the chart
-header (§1.5/2). Wire the Table ⟷ Charts segmented control in
-`RunDetailView` so the body swaps between `CaseTable` and the chart.
+No new tests required (UI-only placeholder). Test count holds at ~180.
 
-The four remaining chart slots (LatencyHistogram, LatencyPercentile,
-Roofline, MemoryPressure) render placeholders that read "Coming in
-2.3" — design doc §06.
-
-Files to create:
-- `Views/ThroughputBarChart.swift`
-- `Charts/ChartDataBuilder.swift` — pure `[CaseRow] → [ChartSeries]`
-  builder (reuses the same row list the table consumes).
-- `Tests/ChartDataBuilderTests.swift`
-
-Target tests after Item 3c: ~177 total (169 + ~8 new).
+After 3d, the only remaining work is Items 4a → 4b → 4c (New Run
+modal + RunController integration) which closes Phase 2.1.
 
 ## Conventions (don't violate)
 
@@ -172,12 +163,15 @@ Target tests after Item 3c: ~177 total (169 + ~8 new).
 
 ## Begin
 
-1. Read docs/phase-2.1-plan.md §1.5, §2 Item 3c, §2.5, §5, §6.
-2. Read docs/design/phase-2.1-design.html sections 04 (Main Window /
-   Data Table) and 06 (Chart compositions — ThroughputBarChart spec).
-3. Skim VectorSuiteBench/VectorSuiteBench/Models/CaseTableFilter.swift
-   and Views/CaseTable.swift to see the shared filter contract.
-4. Start with Item 3c (ThroughputBarChart + toggle) → commit → push.
+1. Read docs/phase-2.1-plan.md §2 Item 3d, §1.5/4 (the locked diff
+   visual), §6 (deferral language for Compare mode).
+2. Read docs/design/phase-2.1-design.html §04 "Toolbar" for the
+   button's chrome placement.
+3. Skim VectorSuiteBench/VectorSuiteBench/AppRoot.swift to find the
+   right home for the toolbar button (either app-level toolbar or a
+   detail-pane local toolbar).
+4. Add the disabled `⇋ Compare` button → commit → push.
+5. Then Item 4a (modal shell).
 
 If anything reads ambiguous, stop and ask — the locked decisions are
 NOT ambiguous, but the design doc is silent on a few sub-decisions

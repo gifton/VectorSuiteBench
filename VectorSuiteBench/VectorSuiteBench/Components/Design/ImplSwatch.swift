@@ -44,7 +44,12 @@ struct ImplSwatch: View {
 /// though they aren't current `ImplKind` cases — the design tokens for
 /// them exist; the mapping will be filled in when Phase 2.2 / 2.3 adds
 /// real impls.
-enum ImplDisplayKind: String, CaseIterable, Hashable, Sendable {
+/// **`nonisolated`** — same rationale as `VerificationDisplayState` (sibling
+/// in this folder). The enum is a pure value; the only MainActor-bound
+/// member is `color`, which reads `VSB.Impl.*` tokens — that one keeps
+/// `@MainActor` explicitly. `label` is a static string switch and is
+/// callable from nonisolated builders (`ChartDataBuilder`, `CaseRowBuilder`).
+nonisolated enum ImplDisplayKind: String, CaseIterable, Hashable, Sendable {
     case vectorCore
     case accelerate
     case vDSP
@@ -52,7 +57,9 @@ enum ImplDisplayKind: String, CaseIterable, Hashable, Sendable {
     case naive
     case simd
 
-    var color: Color {
+    /// MainActor-isolated because it reads `VSB.Impl.*` tokens. Consumers
+    /// are SwiftUI body blocks (also MainActor) so the isolation is free.
+    @MainActor var color: Color {
         switch self {
         case .vectorCore: return VSB.Impl.vectorCore
         case .accelerate: return VSB.Impl.accelerate
