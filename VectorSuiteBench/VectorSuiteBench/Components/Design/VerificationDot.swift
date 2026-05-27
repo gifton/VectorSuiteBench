@@ -18,24 +18,14 @@ import SwiftUI
 /// row-level VoiceOver descriptions.
 ///
 /// `VerificationDisplayState` is a local enum that mirrors BenchKit's
-/// `VerificationResult` — kept local so this file compiles before the
-/// BenchKit SwiftPM dependency lands. Add an adapter at the seam
-/// (Item 3b) once the dep is added:
-/// ```
-/// extension VerificationResult {
-///     var displayState: VerificationDisplayState {
-///         switch self {
-///         case .verified:     return .verified
-///         case .unverifiable: return .unverifiable
-///         case .failed:       return .failed
-///         }
-///     }
-/// }
-/// ```
-/// Note that `BenchKit.VerificationResult` carries associated data
-/// (`maxUlpObserved`, `window`, `sampleIndex`, `reason`); the dot's
-/// adapter intentionally discards those. The Status column's flag pills
-/// and notes consume the rest.
+/// `VerificationResult` — local because the dot's display surface is
+/// strictly UI (it doesn't need BenchKit's associated values: ULP
+/// counts, window sizes, sample indices, reason strings). Those
+/// associated values are consumed at the table row's Status cell via
+/// `CaseRowBuilder.displayVerification(_:)`, which produces a
+/// `(VerificationDisplayState, optional note string)` pair so the dot
+/// gets the simple state and the pill/note get the rich data — single
+/// switch, two outputs, no parallel adapters.
 struct VerificationDot: View {
     let state: VerificationDisplayState
     let size: CGFloat

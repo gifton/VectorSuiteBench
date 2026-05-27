@@ -111,21 +111,24 @@ nonisolated enum ChartDataBuilder {
 
     // MARK: - Series-color mapping
 
-    /// Explicit color for an impl label. Drives Swift Charts'
+    /// Explicit color for an impl. Drives Swift Charts'
     /// `.chartForegroundStyleScale(domain:range:)` so VectorCore is the
     /// only saturated cyan and the other impls render at graphite per
-    /// design principle P-02. `nonisolated`-but-MainActor-token-accessing:
-    /// these tokens are MainActor under the app target's default; this
-    /// helper is consumed from the chart view body which is MainActor.
-    @MainActor static func color(forImplLabel label: String) -> Color {
-        switch label {
-        case ImplDisplayKind.vectorCore.label: return VSB.Impl.vectorCore
-        case ImplDisplayKind.accelerate.label: return VSB.Impl.accelerate
-        case ImplDisplayKind.vDSP.label:       return VSB.Impl.vDSP
-        case ImplDisplayKind.metal.label:      return VSB.Impl.metal
-        case ImplDisplayKind.naive.label:      return VSB.Impl.naive
-        case ImplDisplayKind.simd.label:       return VSB.Impl.simd
-        default:                               return VSB.Text.md
+    /// design principle P-02.
+    ///
+    /// Takes `ImplDisplayKind` directly (rather than a label string) so
+    /// the switch is exhaustive on a closed enum — a future label
+    /// rename can't silently break color mapping. `@MainActor` because
+    /// it reads `VSB.Impl.*` tokens; consumers are chart view bodies
+    /// which are MainActor anyway.
+    @MainActor static func color(for impl: ImplDisplayKind) -> Color {
+        switch impl {
+        case .vectorCore: return VSB.Impl.vectorCore
+        case .accelerate: return VSB.Impl.accelerate
+        case .vDSP:       return VSB.Impl.vDSP
+        case .metal:      return VSB.Impl.metal
+        case .naive:      return VSB.Impl.naive
+        case .simd:       return VSB.Impl.simd
         }
     }
 }

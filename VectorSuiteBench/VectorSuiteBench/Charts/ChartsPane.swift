@@ -29,36 +29,17 @@ struct ChartsPane: View {
 
     // MARK: - Chart picker
 
-    /// Horizontal segmented control listing all five charts. The four
-    /// not yet implemented are still selectable so the user can read the
+    /// Horizontal tab picker listing all five charts. The four not yet
+    /// implemented are still selectable so the user can read the
     /// "Coming in 2.3" copy and know what's planned — better than hiding
     /// the option entirely, which would imply the spec is smaller than
-    /// it is.
+    /// it is. Uses the shared `UnderlineTabPicker` so the chrome matches
+    /// the `Table ⟷ Charts` toggle in `RunDetailView`.
     private var picker: some View {
-        HStack(spacing: 0) {
-            ForEach(ChartSlot.allCases) { slot in
-                Button {
-                    selection = slot
-                } label: {
-                    Text(slot.label)
-                        .vsbMonoBadge(color: slot == selection ? VSB.Impl.vectorCore : VSB.Text.md)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(slot == selection ? VSB.accentSoft : Color.clear)
-                        .overlay(
-                            Rectangle()
-                                .fill(slot == selection ? VSB.Impl.vectorCore : Color.clear)
-                                .frame(height: 1),
-                            alignment: .bottom
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer()
+        UnderlineTabPicker(items: ChartSlot.allCases, selection: $selection) { slot, isSelected in
+            Text(slot.label)
+                .vsbMonoBadge(color: isSelected ? VSB.Impl.vectorCore : VSB.Text.md)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 6)
-        .background(VSB.Surface.s0)
     }
 
     // MARK: - Content

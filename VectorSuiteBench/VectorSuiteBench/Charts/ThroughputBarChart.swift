@@ -36,20 +36,30 @@ struct ThroughputBarChart: View {
 
     @State private var metric: ThroughputMetric = .gflops
 
-    /// Filtered + lowered bars. Recomputed when the filter mutates
-    /// (Observation framework) or `rows` changes.
-    private var bars: [ChartBar] {
-        ChartDataBuilder.build(from: filter.apply(to: rows))
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
+        // Build the bar list **once per render** and pass it down to the
+        // chart-content subview. Previously this was a computed property
+        // accessed four times per body (visibility check, Chart(_:), and
+        // both legs of the impl-color scale), which ran `filter.apply` +
+        // `ChartDataBuilder.build` ~4× per render. Hoisting the let into
+        // the body root + threading it through one helper collapses
+        // those to one pass.
+        //
+        // Filtering by `metric.value(in:) != nil` is the H2 fix from the
+        // review: a bar with the *other* metric populated (say only
+        // `bandwidthGBPerSec`) used to render as a zero-height bar when
+        // GFLOP/s was selected — silently misleading. Drop those before
+        // the chart sees them.
+        let bars = ChartDataBuilder.build(from: filter.apply(to: rows))
+        let visible = bars.filter { metric.value(in: $0) != nil }
+
+        return VStack(spacing: 0) {
             header
             Divider().background(VSB.Surface.hair)
-            if bars.isEmpty {
+            if visible.isEmpty {
                 emptyState
             } else {
-                chart
+                chart(visible: visible)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -88,13 +98,17 @@ struct ThroughputBarChart: View {
 
     // MARK: - Chart
 
-    /// The bar chart proper. `position: .automatic` lets Swift Charts
-    /// group bars within each X category by impl (the `.foregroundStyle`
-    /// dimension); `position: .dodge` would force explicit side-by-side,
-    /// but `.automatic` adapts as the impl count varies per category and
-    /// reads better at default density.
-    private var chart: some View {
-        Chart(bars) { bar in
+    /// The bar chart proper. Takes the already-filtered visible bar list
+    /// from `body` so this function never re-runs the filter pipeline.
+    /// Domain + range are derived from the `present` set of impls in the
+    /// visible bars — VectorCore-first ordering means the legend reads
+    /// the saturated bar at the top regardless of input ordering.
+    private func chart(visible: [ChartBar]) -> some View {
+        let presentImpls = orderedPresentImpls(in: visible)
+        let domain = presentImpls.map(\.label)
+        let range = presentImpls.map(ChartDataBuilder.color(for:))
+
+        return Chart(visible) { bar in
             BarMark(
                 x: .value("Operation", bar.categoryLabel),
                 y: .value(metric.unit, metric.value(in: bar) ?? 0)
@@ -102,7 +116,7 @@ struct ThroughputBarChart: View {
             .foregroundStyle(by: .value("Impl", bar.implLabel))
             .opacity(bar.isApproximate ? 0.5 : 1.0)
         }
-        .chartForegroundStyleScale(domain: implDomain, range: implRange)
+        .chartForegroundStyleScale(domain: domain, range: range)
         .chartLegend(position: .top, alignment: .trailing, spacing: 12)
         .chartXAxis {
             AxisMarks { value in
@@ -130,27 +144,17 @@ struct ThroughputBarChart: View {
         .padding(16)
     }
 
-    /// Domain (legend keys) + range (colors) for the impl color scale.
-    /// Pinned per design principle P-02: VectorCore is the only
-    /// saturated color, others are graphite. Domain order = legend
-    /// order, so VectorCore reads first.
-    private var implDomain: [String] {
-        // Stable order across renders. Only include impls actually present
-        // in the bar set so the legend doesn't show ghosts.
-        let present = Set(bars.map(\.implLabel))
-        let ordered: [String] = [
-            ImplDisplayKind.vectorCore.label,
-            ImplDisplayKind.accelerate.label,
-            ImplDisplayKind.vDSP.label,
-            ImplDisplayKind.simd.label,
-            ImplDisplayKind.metal.label,
-            ImplDisplayKind.naive.label,
+    /// `[ImplDisplayKind]` ordered so VectorCore is first in the legend
+    /// (design principle P-02) and only impls actually present in the
+    /// bar set make it in (no ghost legend entries). The fixed ordering
+    /// list is also the seam where future impls (`vDSP`, `metal` are
+    /// reserved) slot in without re-shuffling.
+    private func orderedPresentImpls(in bars: [ChartBar]) -> [ImplDisplayKind] {
+        let present = Set(bars.map { $0.impl.display })
+        let ordered: [ImplDisplayKind] = [
+            .vectorCore, .accelerate, .vDSP, .simd, .metal, .naive,
         ]
         return ordered.filter { present.contains($0) }
-    }
-
-    private var implRange: [Color] {
-        implDomain.map(ChartDataBuilder.color(forImplLabel:))
     }
 
     // MARK: - Empty state

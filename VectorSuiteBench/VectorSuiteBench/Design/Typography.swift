@@ -33,6 +33,13 @@ extension VSB {
         /// Design doc: 10/600/0.6.
         static let caption     = Font.system(size: 10, weight: .semibold)
 
+        /// Body weight bumped to 600 — used for the Operation column of
+        /// the data table (`dot ƒ32`) and any other cell whose label
+        /// anchors a row's identity. Same size + tracking as `body` so it
+        /// sits on the same line metrics; only the weight changes.
+        /// Design doc: 12.5/600/0 (per plan §3c "Operation: SF Pro · 600").
+        static let bodySemibold = Font.system(size: 12.5, weight: .semibold)
+
         /// **Every number cell in the app uses this font.** SF Mono with
         /// `monospacedDigit()` so digits sit on a tabular grid — a P99 cell
         /// at 1234 ns and one at 142 ns align vertically without flicker
@@ -72,6 +79,17 @@ extension View {
     /// Default app body text. SF Pro 12.5 regular at `text.hi`.
     func vsbBody(color: Color = VSB.Text.hi) -> some View {
         self.font(VSB.Fonts.body)
+            .foregroundStyle(color)
+    }
+
+    /// Identity-anchor body text — SF Pro 12.5 **semibold** at `text.hi`.
+    /// Used for cells whose label is the row's primary lookup key (e.g.
+    /// the Operation column of the data table) where the heavier weight
+    /// distinguishes the anchor from the supporting columns at the same
+    /// size. Plan §3c pins the Operation column to "SF Pro · 600" — this
+    /// modifier is the named home for that weight.
+    func vsbBodySemibold(color: Color = VSB.Text.hi) -> some View {
+        self.font(VSB.Fonts.bodySemibold)
             .foregroundStyle(color)
     }
 

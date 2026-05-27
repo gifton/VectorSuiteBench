@@ -260,15 +260,11 @@ extension ImplKind {
     }
 }
 
-extension VerificationResult {
-    nonisolated var displayState: VerificationDisplayState {
-        switch self {
-        case .verified:     return .verified
-        case .unverifiable: return .unverifiable
-        case .failed:       return .failed
-        }
-    }
-}
+// `VerificationResult` is lowered to `VerificationDisplayState` via
+// `CaseRowBuilder.displayVerification(_:)` above, which also produces the
+// short Status-cell note (`"ulp>NNNN"` for `.failed`, truncated reason for
+// `.unverifiable`). A standalone `displayState` property would duplicate
+// that switch and split the truth — kept inline at the call site instead.
 
 // MARK: - Shape / DType formatting helpers
 

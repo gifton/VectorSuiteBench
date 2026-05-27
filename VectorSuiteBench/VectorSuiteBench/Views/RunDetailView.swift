@@ -85,50 +85,28 @@ struct RunDetailView: View {
                 ChartsPane(rows: rows, filter: filter)
             }
         }
-        .task(id: document.runMetadata.runID) {
-            rows = CaseRowBuilder.build(from: document.cases)
-        }
     }
 
-    /// Two-position segmented control between the header and the body.
-    /// `Table` default per plan §3b. Sits in its own strip so the
-    /// affordance is visible regardless of which mode the body is in.
+    /// Two-position tab picker between the header and the body. `Table`
+    /// default per plan §3b. Uses the shared `UnderlineTabPicker` (also
+    /// used by `ChartsPane`) so the chrome stays identical across the
+    /// app's tab affordances.
     private var bodyToggle: some View {
-        HStack(spacing: 0) {
-            ForEach(BodyMode.allCases) { mode in
-                Button {
-                    bodyMode = mode
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: mode.iconName)
-                            .imageScale(.small)
-                        Text(mode.label)
-                            .vsbMonoBadge(color: mode == bodyMode ? VSB.Impl.vectorCore : VSB.Text.md)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .foregroundStyle(mode == bodyMode ? VSB.Impl.vectorCore : VSB.Text.md)
-                    .background(mode == bodyMode ? VSB.accentSoft : Color.clear)
-                    .overlay(
-                        Rectangle()
-                            .fill(mode == bodyMode ? VSB.Impl.vectorCore : Color.clear)
-                            .frame(height: 1),
-                        alignment: .bottom
-                    )
-                }
-                .buttonStyle(.plain)
+        UnderlineTabPicker(items: BodyMode.allCases, selection: $bodyMode) { mode, isSelected in
+            HStack(spacing: 6) {
+                Image(systemName: mode.iconName)
+                    .imageScale(.small)
+                Text(mode.label)
+                    .vsbMonoBadge(color: isSelected ? VSB.Impl.vectorCore : VSB.Text.md)
             }
-            Spacer()
+            .foregroundStyle(isSelected ? VSB.Impl.vectorCore : VSB.Text.md)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 6)
-        .background(VSB.Surface.s0)
     }
 
     /// Detail-pane body modes. Persisting selection across runs would
     /// only matter if users care — punt to a future preference if it
     /// comes up. For now, every run starts in Table mode.
-    private enum BodyMode: String, Identifiable, CaseIterable {
+    private enum BodyMode: String, Identifiable, CaseIterable, Hashable {
         case table
         case charts
 
@@ -164,18 +142,26 @@ struct RunDetailView: View {
     // MARK: - Loading
 
     private func loadRun() async {
-        // Clear stale state if the runID just changed; we'll set the new
-        // one below.
+        // Clear stale state if the runID just changed — including the
+        // expanded `rows` list. Previously `rows` was rebuilt by a
+        // `.task(id: document.runMetadata.runID)` attached to the content
+        // VStack; that fired *after* the new document was set, leaving
+        // a brief window where the new run's header + summary rendered
+        // against the previous run's rows. Building rows here, in the
+        // same Task as the document load, removes the race.
         if document?.runMetadata.runID != runID {
             document = nil
+            rows = []
             loadError = nil
         }
         do {
             let doc = try coordinator.loadRun(id: runID)
             document = doc
+            rows = CaseRowBuilder.build(from: doc.cases)
             loadError = nil
         } catch {
             document = nil
+            rows = []
             loadError = "Couldn't load run \(runID): \(error.localizedDescription)"
         }
     }

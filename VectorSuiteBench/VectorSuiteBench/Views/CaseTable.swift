@@ -110,8 +110,7 @@ private struct OperationCell: View {
     var body: some View {
         HStack(spacing: 4) {
             Text("\(row.workloadID.op.rawValue) \(row.workloadID.dtype.displayGlyph)")
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(VSB.Text.hi)
+                .vsbBodySemibold()
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -181,13 +180,19 @@ private struct LatencyCell: View {
             if row.verification == .failed {
                 NumberCell(state: .error)
             } else if let v = value {
+                // Color is computed up here so the bimodal-P999 → warn,
+                // approximate → text-md, unverifiable → text-md,
+                // VectorCore → accent decisions live in one place. The
+                // previous `.foregroundStyle(...)` wrapper was dead — the
+                // inner `.vsbMonoNumber(color:)` of `NumberCell` already
+                // pinned the foreground at the leaf, so a parent style
+                // never won. `colorOverride` is the explicit seam.
                 NumberCell(
                     state: .value(v),
                     format: latencyFormat(for: v),
                     unit: nil,
-                    isAccent: row.isVectorCore && !row.isApproximate && row.verification != .unverifiable
+                    colorOverride: latencyColor(row: row, isP999: isP999)
                 )
-                .foregroundStyle(latencyColor(row: row, isP999: isP999))
             } else {
                 NumberCell(state: .missing)
             }
@@ -237,16 +242,26 @@ private struct ThroughputCell: View {
                     HStack(spacing: 3) {
                         Spacer(minLength: 0)
                         if let g = row.gflops {
-                            Text(String(format: "%.1f", g))
-                                .vsbMonoNumber(color: numberColor(row: row))
+                            NumberCell(
+                                state: .value(g),
+                                format: "%.1f",
+                                colorOverride: numberColor(row: row)
+                            )
                             Text("GFLOP/s").vsbMonoSha()
                         } else {
-                            Text("—").vsbMonoNumber(color: VSB.Text.lo)
+                            NumberCell(state: .missing)
                         }
                     }
                     HStack(spacing: 3) {
                         Spacer(minLength: 0)
                         if let bw = row.bandwidthGBPerSec {
+                            // The bandwidth sub-row renders at the smaller
+                            // `monoShaAxis` font (it's the context line under
+                            // the GFLOP/s primary). NumberCell uses
+                            // `monoNumber` by design, so the bandwidth row
+                            // stays as a hand-rolled Text pair — matches
+                            // the design doc's "GFLOP/s primary · GB/s
+                            // context" layout.
                             Text(String(format: "%.1f", bw))
                                 .vsbMonoSha(color: numberColor(row: row))
                             Text("GB/s").vsbMonoSha()
@@ -302,11 +317,11 @@ private struct StatusCell: View {
     /// about this row" surface and a CSV export of just (op, impl, status)
     /// should still tell you the row is approximate.
     private var flagPills: [(text: String, style: PillStyle, icon: Character)] {
-        var pills: [(String, PillStyle, Character)] = []
-        if row.isBimodal   { pills.append(("BIMODAL", .info,   "⌇")) }
-        if row.isTruncated { pills.append(("TRUNC",   .warn,   "⏱")) }
-        if row.isApproximate { pills.append(("APPROX", .approx, "~")) }
-        return pills.map { ($0.0, $0.1, $0.2) }
+        var pills: [(text: String, style: PillStyle, icon: Character)] = []
+        if row.isBimodal     { pills.append((text: "BIMODAL", style: .info,   icon: "⌇")) }
+        if row.isTruncated   { pills.append((text: "TRUNC",   style: .warn,   icon: "⏱")) }
+        if row.isApproximate { pills.append((text: "APPROX",  style: .approx, icon: "~")) }
+        return pills
     }
 }
 

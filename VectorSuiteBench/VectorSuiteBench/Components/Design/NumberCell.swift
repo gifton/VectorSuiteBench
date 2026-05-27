@@ -24,17 +24,29 @@ struct NumberCell: View {
     let format: String
     let unit: String?
     let isAccent: Bool
+    /// Explicit foreground color override. When `nil`, the cell falls
+    /// back to its baked-in logic (`isAccent` → VectorCore cyan, else
+    /// `text.hi`). When set, replaces that logic for the `.value` state —
+    /// callers that need a finer color decision (the data table's
+    /// LatencyCell, which switches on bimodal/approximate/unverifiable
+    /// state per row) compute the color upstream and pass it in. The
+    /// `.missing` and `.error` states ignore the override because their
+    /// colors are themselves semantic (em-dash always at `text.lo`,
+    /// ERR always at `--fail`).
+    let colorOverride: Color?
 
     init(
         state: State,
         format: String = "%.0f",
         unit: String? = nil,
-        isAccent: Bool = false
+        isAccent: Bool = false,
+        colorOverride: Color? = nil
     ) {
         self.state = state
         self.format = format
         self.unit = unit
         self.isAccent = isAccent
+        self.colorOverride = colorOverride
     }
 
     enum State: Equatable, Sendable {
@@ -60,7 +72,7 @@ struct NumberCell: View {
             switch Self.sanitize(state) {
             case .value(let v):
                 Text(String(format: format, v))
-                    .vsbMonoNumber(color: isAccent ? VSB.Impl.vectorCore : VSB.Text.hi)
+                    .vsbMonoNumber(color: colorOverride ?? (isAccent ? VSB.Impl.vectorCore : VSB.Text.hi))
                 if let unit {
                     Text(unit)
                         .vsbMonoSha()
