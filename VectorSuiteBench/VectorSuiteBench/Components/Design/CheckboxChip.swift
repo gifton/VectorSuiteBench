@@ -5,9 +5,11 @@ import SwiftUI
 /// (`dot · ∑ aᵢbᵢ`). Tap-to-toggle.
 ///
 /// **Selected state treatment** (per design doc §05): 6 % cyan fill,
-/// 0.5 px cyan border, checkbox glyph fills with accent. **Unselected**:
-/// 2 % white + hair-line border — quiet by default, so a half-configured
-/// run reads as half-configured.
+/// 0.5 px cyan border, checkbox glyph fills with accent. The fill +
+/// border live in `.selectableChip(isSelected:)` (the shared modifier
+/// also used by `ImplChip`, the preset segmented control, and the
+/// size-pill grid) so a future design-doc adjustment to chip styling
+/// changes once.
 ///
 /// The chip is fully self-contained: it takes `title`, `subtitle`,
 /// `isSelected`, and an action closure. Re-usable for any future
@@ -37,12 +39,7 @@ struct CheckboxChip: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(background)
-            .overlay(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .strokeBorder(border, lineWidth: borderWidth)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .selectableChip(isSelected: isSelected)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -50,8 +47,6 @@ struct CheckboxChip: View {
         .accessibilityLabel(Text("\(title), \(subtitle)"))
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
-
-    // MARK: - Parts
 
     /// Filled-square glyph when selected, hollow when not. Native SF
     /// Symbol so it picks up the system's checkmark rendering across
@@ -61,24 +56,6 @@ struct CheckboxChip: View {
             .imageScale(.medium)
             .foregroundStyle(isSelected ? VSB.Impl.vectorCore : VSB.Text.lo)
             .accessibilityHidden(true)
-    }
-
-    /// Backgrounds match the design doc spec: 6 % cyan when selected,
-    /// 2 % white otherwise. Kept inline (not a token) because the chip
-    /// is the only consumer of these specific opacities; tokenizing
-    /// would over-generalize.
-    private var background: Color {
-        isSelected
-            ? VSB.Impl.vectorCore.opacity(0.06)
-            : Color.white.opacity(0.02)
-    }
-
-    private var border: Color {
-        isSelected ? VSB.Impl.vectorCore.opacity(0.5) : VSB.Surface.hair2
-    }
-
-    private var borderWidth: CGFloat {
-        isSelected ? 0.5 : 0.5
     }
 }
 

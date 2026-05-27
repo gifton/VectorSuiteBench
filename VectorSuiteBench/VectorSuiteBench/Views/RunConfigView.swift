@@ -25,7 +25,14 @@ import BenchKit
 struct RunConfigView: View {
 
     @State private var config = RunConfig()
-    let onDismiss: () -> Void
+
+    /// Native SwiftUI dismissal. Replaces an earlier `onDismiss` closure
+    /// parameter — `.dismiss` is the macOS-idiomatic path and it covers
+    /// the three dismissal triggers (Cancel button, Escape key,
+    /// click-outside) through one mechanism. The parent's
+    /// `.sheet(isPresented:)` binding flips to false automatically when
+    /// `dismiss()` fires.
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
@@ -132,15 +139,7 @@ struct RunConfigView: View {
                 .vsbMonoBadge(color: isSelected ? VSB.Impl.vectorCore : VSB.Text.md)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(isSelected ? VSB.Impl.vectorCore.opacity(0.06) : Color.white.opacity(0.02))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(
-                            isSelected ? VSB.Impl.vectorCore.opacity(0.5) : VSB.Surface.hair2,
-                            lineWidth: 0.5
-                        )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .selectableChip(isSelected: isSelected)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -223,15 +222,10 @@ struct RunConfigView: View {
                 .vsbMonoBadge(color: isSelected ? VSB.Impl.vectorCore : VSB.Text.md)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(isSelected ? VSB.Impl.vectorCore.opacity(0.06) : Color.white.opacity(0.02))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .strokeBorder(
-                            isSelected ? VSB.Impl.vectorCore.opacity(0.5) : VSB.Surface.hair2,
-                            lineWidth: 0.5
-                        )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                // Size pills use the smaller `Pill`-radius (3) — they
+                // read as pills, not grid chips. Same selectable-chip
+                // background/border treatment otherwise.
+                .selectableChip(isSelected: isSelected, cornerRadius: 3)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -331,7 +325,7 @@ struct RunConfigView: View {
         HStack(spacing: 16) {
             estimateBlock
             Spacer()
-            Button("Cancel", action: onDismiss)
+            Button("Cancel") { dismiss() }
                 .keyboardShortcut(".", modifiers: .command)
                 .buttonStyle(.bordered)
             startButton
@@ -341,23 +335,31 @@ struct RunConfigView: View {
         .background(VSB.Surface.s0)
     }
 
-    /// Three accent-colored numerics + a small breakdown grid hint. In
-    /// 4a these render as `~ cases · ~ wall · ~ size` placeholders —
-    /// 4b wires the estimator and they go live.
+    /// Three accent-colored numerics matching the design doc §05 footer
+    /// shape (`~342 cases · ~4m 50s · ~12 MB JSON`). In 4a all three
+    /// cells render as `—` placeholders; 4b wires the live estimator.
+    ///
+    /// **Cell shape varies by metric.** The cases cell + bytes cell have
+    /// a trailing unit label (`cases` / `MB JSON`); the wall-clock cell
+    /// is a composite duration string (`4m 50s`) with no separate unit
+    /// because the duration's `m`/`s` are baked into the value itself.
+    /// Modeled here as `unit: String?` — nil = no trailing label.
     private var estimateBlock: some View {
         HStack(spacing: 8) {
             estimateCell(value: "—", unit: "cases")
             dot
-            estimateCell(value: "—", unit: "wall")
+            estimateCell(value: "—", unit: nil)
             dot
-            estimateCell(value: "—", unit: "JSON")
+            estimateCell(value: "—", unit: "MB JSON")
         }
     }
 
-    private func estimateCell(value: String, unit: String) -> some View {
+    private func estimateCell(value: String, unit: String?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(value).vsbMonoNumber(color: VSB.Impl.vectorCore.opacity(0.5))
-            Text(unit).vsbMonoSha()
+            if let unit {
+                Text(unit).vsbMonoSha()
+            }
         }
     }
 
@@ -404,6 +406,6 @@ extension AbortPolicy:     BudgetLabelable {}
 // MARK: - Preview
 
 #Preview("RunConfigView — smoke default") {
-    RunConfigView(onDismiss: {})
+    RunConfigView()
         .background(VSB.Surface.bg)
 }

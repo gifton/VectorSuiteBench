@@ -36,12 +36,7 @@ struct ImplChip: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(background)
-            .overlay(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .strokeBorder(border, lineWidth: 0.5)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .selectableChip(isSelected: isSelected)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -50,25 +45,14 @@ struct ImplChip: View {
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 
-    // MARK: - Parts
-
     /// Same checkmark glyph as `CheckboxChip` so the two chip families
-    /// share the click affordance.
+    /// share the click affordance. Fill + border treatment lives in the
+    /// shared `.selectableChip(...)` modifier.
     private var checkbox: some View {
         Image(systemName: isSelected ? "checkmark.square.fill" : "square")
             .imageScale(.medium)
             .foregroundStyle(isSelected ? VSB.Impl.vectorCore : VSB.Text.lo)
             .accessibilityHidden(true)
-    }
-
-    private var background: Color {
-        isSelected
-            ? VSB.Impl.vectorCore.opacity(0.06)
-            : Color.white.opacity(0.02)
-    }
-
-    private var border: Color {
-        isSelected ? VSB.Impl.vectorCore.opacity(0.5) : VSB.Surface.hair2
     }
 
     private var accessibilityLabel: String {

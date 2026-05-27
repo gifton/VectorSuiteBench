@@ -64,7 +64,11 @@ struct AppRoot: View {
             )
         }
         .sheet(isPresented: $isNewRunSheetPresented) {
-            RunConfigView(onDismiss: { isNewRunSheetPresented = false })
+            // `RunConfigView` dismisses itself via `@Environment(\.dismiss)`,
+            // which auto-flips this binding to false through the sheet
+            // presentation mechanism. No explicit `onDismiss` plumbing
+            // required.
+            RunConfigView()
         }
     }
 
