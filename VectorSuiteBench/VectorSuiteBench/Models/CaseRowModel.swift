@@ -294,6 +294,32 @@ extension DType {
     }
 }
 
+extension OpKind {
+    /// Mathematical shorthand for the operation — surfaced beneath the op
+    /// name in the New Run modal's Operations grid (design doc §05). The
+    /// glyph removes the "does L2 mean norm or distance?" cognitive tax
+    /// that bites engineers re-reading a benchmark after a few months
+    /// away from it.
+    ///
+    /// Notation follows the conventions in
+    /// `/Users/goftin/.claude/CLAUDE.md` (vectors lowercase bold,
+    /// matrices uppercase bold, `‖·‖` for L2 norms). Rendered in
+    /// `vsbMonoSha` so the math glyphs sit tabular with the labels.
+    nonisolated var mathShorthand: String {
+        switch self {
+        case .dot:                return "∑ aᵢbᵢ"
+        case .l2dist:             return "√Σ(aᵢ−bᵢ)²"
+        case .cosine:             return "a·b / ‖a‖‖b‖"
+        case .normalize:          return "v / ‖v‖"
+        case .axpy:               return "y ← αx + y"
+        case .topK:               return "arg min_k ‖q−aᵢ‖"
+        case .pairwiseDistances:  return "‖aᵢ − bⱼ‖"
+        case .distanceMatrix:     return "‖A − B‖"
+        case .null:               return "—"
+        }
+    }
+}
+
 // MARK: - CaseRow sort keys
 
 extension CaseRow {

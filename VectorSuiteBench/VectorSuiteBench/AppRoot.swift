@@ -28,6 +28,11 @@ struct AppRoot: View {
     @State private var coordinator = RunStoreCoordinator.makeDefault()
     @State private var selectedRunID: String? = nil
     @State private var calibration = CalibrationStatus()
+    /// New Run sheet presentation flag. Driven by the toolbar's
+    /// `+ New Run` button; `RunConfigView` calls `onDismiss` to flip it
+    /// back. Owned here (not inside `AppToolbar`) because the toolbar
+    /// is `ToolbarContent` and can't host a `.sheet(_:)` modifier.
+    @State private var isNewRunSheetPresented = false
     private let hardware: HardwareInventory = HardwareInventory.probe()
 
     var body: some View {
@@ -48,12 +53,18 @@ struct AppRoot: View {
         }
         .environment(coordinator)
         .toolbar {
-            // Window-level chrome (design doc §04 "Toolbar"). Buttons are
-            // disabled placeholders in 2.1; phase mapping lives in
-            // `AppToolbar.swift`. `.idle` is hard-coded until Item 4c
-            // exposes a `RunProgress` observable for the app to read —
-            // the seam (`LiveState` enum) is already in place.
-            AppToolbar(hardware: hardware, liveState: .idle)
+            // Window-level chrome (design doc §04 "Toolbar"). `+ New Run`
+            // is wired as of Item 4a; the other three buttons stay
+            // disabled until their phase lands. `.idle` is hard-coded
+            // until Item 4c exposes a `RunProgress` observable.
+            AppToolbar(
+                hardware: hardware,
+                liveState: .idle,
+                onNewRun: { isNewRunSheetPresented = true }
+            )
+        }
+        .sheet(isPresented: $isNewRunSheetPresented) {
+            RunConfigView(onDismiss: { isNewRunSheetPresented = false })
         }
     }
 

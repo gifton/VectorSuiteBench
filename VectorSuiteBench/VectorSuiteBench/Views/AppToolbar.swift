@@ -32,6 +32,11 @@ struct AppToolbar: ToolbarContent {
 
     let hardware: HardwareInventory
     let liveState: LiveState
+    /// Action for the `+ New Run` button. Wired by `AppRoot` to flip the
+    /// sheet-presented state. Item 4a turned this from a disabled
+    /// placeholder into a real affordance; 4b/4c keep extending the
+    /// sheet's behavior without further toolbar changes.
+    let onNewRun: () -> Void
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
@@ -47,16 +52,16 @@ struct AppToolbar: ToolbarContent {
 
     // MARK: - Buttons
 
-    /// **`+ New Run`** — wired in Item 4a. Primary action of the entire
-    /// app: opens a sheet to configure and start a benchmark run.
+    /// **`+ New Run`** — enabled as of Item 4a: opens the
+    /// `RunConfigView` sheet to configure a benchmark run. The sheet's
+    /// Start button is still disabled in 4a (the actual `RunController`
+    /// invocation lands in 4c), but the modal layout + selection logic
+    /// is fully usable.
     private var newRunButton: some View {
-        Button {
-            // Wired in Item 4a — opens RunConfigView modal.
-        } label: {
+        Button(action: onNewRun) {
             Label("New Run", systemImage: "plus")
         }
-        .disabled(true)
-        .help("Configure and start a new benchmark run (coming in Item 4a)")
+        .help("Configure and start a new benchmark run")
         .keyboardShortcut("n", modifiers: .command)
     }
 

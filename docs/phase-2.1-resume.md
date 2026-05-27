@@ -14,15 +14,14 @@ phase is now UI implementation against a locked design doc.
 
 - Repo: /Users/goftin/dev/gsuite/VectorSuiteBench · main · push authorized
 - GitHub: gifton/VectorSuiteBench
-- Last commit (after Item 3d): see `git log -1 --oneline`
-- Tests: ~180 total. ~89 in the Xcode app target (DeltaGlyphTests,
+- Last commit (after Item 4a): see `git log -1 --oneline`
+- Tests: ~200 total. ~109 in the Xcode app target (DeltaGlyphTests,
   NumberCellSanitizeTests, RunStoreCoordinatorTests, RunProgressTests,
   RunSummaryGroupingTests, CalibrationStatusTests,
   RunSummaryFormattersTests, CaseTableFilterTests,
-  ChartDataBuilderTests), plus 91 across the BenchKit/VSBCore/VSBRun
-  SwiftPM packages. **Item 3d added no tests** — UI-only placeholder
-  chrome; the `LiveState` enum has trivial pure-value semantics
-  covered by exhaustive switches.
+  ChartDataBuilderTests, **RunConfigTests** — +20 from Item 4a's
+  preset / model / catalog tests), plus 91 across the
+  BenchKit/VSBCore/VSBRun SwiftPM packages.
 - SchemaVersion is 1.2. `RunMetadata.wallTimeNanos: UInt64?` and
   `RunSummary.wallTimeNanos: UInt64?` are populated by
   `RunController.run()` from the queue's start/end clock ticks.
@@ -48,11 +47,15 @@ phase is now UI implementation against a locked design doc.
   shell), 3b (CaseTable — 8-column data table with 6 row treatments
   + CaseRowBuilder + CaseTableFilter shared with 3c), 3c
   (ThroughputBarChart + ChartsPane 5-slot picker + Table ⟷ Charts
-  toggle in RunDetailView; chart honors the shared filter), **3d**
+  toggle in RunDetailView; chart honors the shared filter), 3d
   (window-level AppToolbar with 4 disabled buttons + LiveStateChip;
   keyboard shortcuts reserved on disabled buttons so 4a's New Run
-  ⌘N activation needs no retraining).
-  Remaining: 4a, 4b, 4c.
+  ⌘N activation needs no retraining), **4a** (New Run modal shell:
+  RunConfig model with preset-flips-to-custom logic; RunConfigView
+  with 5 sections + sticky footer + CheckboxChip/ImplChip/FlowLayout
+  atoms; New Run button in AppToolbar wired to present the sheet;
+  Start button stays disabled until 4c).
+  Remaining: 4b, 4c.
 - **Known Xcode quirk**: `xcodebuild ... test` fails at the test-target
   link step (unable to find BenchKit symbols). cmd-U from Xcode IDE
   works (presumably via scheme-level framework linking that diverges
@@ -93,49 +96,54 @@ phase is now UI implementation against a locked design doc.
      VectorSuiteBench/VectorSuiteBench/AppRoot.swift  ← placeholder sidebar
                                                        to be replaced.
 
-## Recommended sequence (1 sub-item → close 2.1)
+## Recommended sequence (2 sub-items → close 2.1)
 
-  1. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
-     This is the last chunk; closes Phase 2.1.
+  1. **Item 4b — Live-estimate footer.** Wire the `~ cases · ~ wall ·
+     ~ JSON` triple to the current `RunConfig` state. Cases = Cartesian
+     product of op × impl × size × mode. Wall ≈ Σ(per-case estimate)
+     using a lookup table seeded from Phase 2.0 smoke timings. Bytes
+     ≈ cases × 32 KB (Phase 2.0 measured average JSON size).
+     Recomputes on every toggle so the cost of a checkbox click is
+     visible in real time. Tests pin the case count (must be exact);
+     wall is allowed to be ±50 %.
 
-## First concrete task: Item 4a — Modal shell (Static layout, no logic)
+  2. **Item 4c — RunController invocation + cancellation.** Start
+     button flips to enabled; tap → spawn detached Task →
+     RunController.run(). RunProgress observable drives the streaming
+     row treatment in the table + the LiveStateChip in the toolbar.
+     Cancel via the cancellation token already validated in Phase 2.0.
 
-Item 4a is the static-layout pass of the New Run modal (`RunConfigView`).
-Per plan §4 the sheet is 980 × 720, dropped from the titlebar, with five
-sections + a sticky live-estimate footer. 4a delivers the visual
-fidelity; 4b wires the estimator; 4c wires `RunController`.
+## First concrete task: Item 4b — Live-estimate footer
 
-Five sections, all rendered with placeholder selected state:
+The static modal shell shipped in 4a. The estimate trio in the footer
+(`~ cases · ~ wall · ~ JSON`) renders em-dash placeholders. 4b makes
+those live.
 
-1. **Preset** — Smoke / Standard / Full / Custom segmented control.
-2. **Operations** — 4-column grid of Checkbox chips (op name + math
-   shorthand, e.g. `dot · ∑ aᵢbᵢ`).
-3. **Implementations** — 2-column grid of `ImplChip`s.
-4. **Vector sizes** — horizontally-wrapping pill grid at log-spaced
-   powers of 2 (`16 · 32 · 64 · ... · 16M`).
-5. **Budgets** — 3 × 2 grid of native-style select fields with mono
-   captions.
+**Computation** (from plan §4):
+- **Cases** = Cartesian product of `config.ops × config.impls ×
+  config.sizes × config.modes.asModes`. Exact. Tests pin this number.
+- **Wall** ≈ Σ(per-case estimate). Seed the per-case estimate from a
+  small lookup table indexed by (op, mode) → ns/op median, populated
+  from Phase 2.0 smoke timings. The estimator multiplies by `samples`
+  for SHOT cases and a constant for LOOP cases. Allowed to be ±50 %
+  rough; tests check direction (more ops → larger wall) not absolute.
+- **Bytes** ≈ cases × 32 KB. The 32 KB constant came from Phase 2.0
+  measured average JSON size; document as "per-case avg, refined when
+  4c lands and we have new-run data to recalibrate against."
 
-Sticky footer: `~342 cases · ~4m 50s · ~12 MB JSON` (placeholder values
-in 4a; 4b makes them live).
+**Files to create:**
+- `Models/RunConfigEstimator.swift` — pure-function
+  `RunConfigEstimator.estimate(_ config: RunConfig) -> Estimate`. Lives
+  in Models because it's pure value-in/value-out, no UI dependency.
+- `VectorSuiteBenchTests/RunConfigEstimatorTests.swift` — cases exact,
+  wall direction, bytes scales with cases.
 
-`+ New Run` toolbar button in `AppToolbar.swift` is already in place
-(disabled, ⌘N reserved). Flip `.disabled(true) → .disabled(false)` and
-wire the action to present the sheet — that's the trigger seam.
+**Files to modify:**
+- `Views/RunConfigView.swift` — replace `estimateBlock` em-dashes with
+  formatted values from the estimator. Mode pill in the breakdown
+  ("5 ops × 2 dtypes · 5 impls · 7 sizes · shot + loop").
 
-Files to create:
-- `Views/RunConfigView.swift` — the sheet shell + 5 sections.
-- `Views/ImplChip.swift` — 2-column-grid impl chip atom.
-- `Views/PresetSegmentedControl.swift` — preset picker.
-- `Views/LiveEstimateFooter.swift` — sticky footer (placeholder copy
-  until 4b).
-
-Files to modify:
-- `AppToolbar.swift` — enable the New Run button, present sheet on tap.
-- `AppRoot.swift` — hold sheet-presented state.
-
-Target tests after 4a: holds at ~180. 4a is layout-only; 4b adds tests
-for the estimator.
+Target tests after 4b: ~210 (200 + ~10 new).
 
 ## Conventions (don't violate)
 
@@ -185,15 +193,14 @@ for the estimator.
 
 ## Begin
 
-1. Read docs/phase-2.1-plan.md §2 Item 4 (sub-items 4a / 4b / 4c) +
-   §2.5 steps 11–13.
-2. Read docs/design/phase-2.1-design.html §05 "New Run modal" for the
-   sheet layout (980 × 720, 180 px label gutter, 5 sections, sticky
-   footer).
-3. Skim VectorSuiteBench/VectorSuiteBench/Views/AppToolbar.swift to
-   see the `newRunButton` seam — flip `.disabled(true) → .disabled(false)`
-   and wire its action to present `RunConfigView`.
-4. Build 4a (modal shell) → commit → push → then 4b → then 4c.
+1. Read docs/phase-2.1-plan.md §2 Item 4b + §2.5 step 12 (estimator
+   wiring).
+2. Read docs/design/phase-2.1-design.html §05 ("The live-estimate
+   footer") for the format: three accent numbers + a small breakdown
+   grid ("5 ops × 2 dtypes · 5 impls · 7 sizes · shot + loop").
+3. Skim VectorSuiteBench/VectorSuiteBench/Views/RunConfigView.swift
+   `estimateBlock` — that's the swap-in point.
+4. Build 4b (estimator + footer wiring) → commit → push → then 4c.
 
 If anything reads ambiguous, stop and ask — the locked decisions are
 NOT ambiguous, but the design doc is silent on a few sub-decisions
