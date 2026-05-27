@@ -19,7 +19,7 @@ struct ImplSwatch: View {
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+        RoundedRectangle(cornerRadius: VSB.Radius.swatch, style: .continuous)
             .fill(impl.color)
             .frame(width: 10, height: 10)
             .modifier(HatchedFillModifier(active: isApproximate))
@@ -27,9 +27,9 @@ struct ImplSwatch: View {
             // overlays a Canvas that draws across the full 10×10 bounding
             // box; without this clip, the diagonal lines stick out past
             // the rounded corners on approximate swatches.
-            .clipShape(RoundedRectangle(cornerRadius: 1.5, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: VSB.Radius.swatch, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                RoundedRectangle(cornerRadius: VSB.Radius.swatch, style: .continuous)
                     .strokeBorder(
                         isApproximate ? Color.white.opacity(0.35) : Color.clear,
                         style: isApproximate

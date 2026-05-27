@@ -52,9 +52,10 @@ extension View {
     ///
     /// - Parameters:
     ///   - isSelected: whether the chip is in the on state.
-    ///   - cornerRadius: corner radius of the chip — defaults to 4 (the
-    ///     grid-chip radius). Pass 3 for size-pill consumers.
-    func selectableChip(isSelected: Bool, cornerRadius: CGFloat = 4) -> some View {
+    ///   - cornerRadius: corner radius of the chip — defaults to
+    ///     `VSB.Radius.chip` (4) for grid chips. Pass `VSB.Radius.pill`
+    ///     (3) for size-pill consumers.
+    func selectableChip(isSelected: Bool, cornerRadius: CGFloat = VSB.Radius.chip) -> some View {
         modifier(SelectableChipBackground(isSelected: isSelected, cornerRadius: cornerRadius))
     }
 }

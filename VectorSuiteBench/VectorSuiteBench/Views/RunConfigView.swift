@@ -222,10 +222,10 @@ struct RunConfigView: View {
                 .vsbMonoBadge(color: isSelected ? VSB.Impl.vectorCore : VSB.Text.md)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                // Size pills use the smaller `Pill`-radius (3) — they
-                // read as pills, not grid chips. Same selectable-chip
-                // background/border treatment otherwise.
-                .selectableChip(isSelected: isSelected, cornerRadius: 3)
+                // Size pills use `VSB.Radius.pill` (3) instead of the
+                // chip default — they read as pills, not grid chips.
+                // Same selectable-chip background/border treatment.
+                .selectableChip(isSelected: isSelected, cornerRadius: VSB.Radius.pill)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -305,7 +305,10 @@ struct RunConfigView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).vsbCaption()
             Picker("", selection: selection) {
-                ForEach(Array(T.allCases), id: \.self) { value in
+                // `T.AllCases` is already RandomAccessCollection per
+                // the where-clause; ForEach takes it directly. Earlier
+                // `Array(T.allCases)` was an eager allocation per render.
+                ForEach(T.allCases, id: \.self) { value in
                     Text(value.label).tag(value)
                 }
             }

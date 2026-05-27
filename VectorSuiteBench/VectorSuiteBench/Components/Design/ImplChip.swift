@@ -33,8 +33,13 @@ struct ImplChip: View {
                     Pill("APPROX", style: .approx, icon: "~")
                 }
             }
+            // Padding matches `CheckboxChip` (10/8). Earlier 10/10
+            // padding was unforced inconsistency — the impl chip has a
+            // single-line content shape (checkbox + swatch + label +
+            // optional pill), so the same vertical breathing room as
+            // the two-line CheckboxChip reads cleanly here too.
             .padding(.horizontal, 10)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .selectableChip(isSelected: isSelected)
             .contentShape(Rectangle())

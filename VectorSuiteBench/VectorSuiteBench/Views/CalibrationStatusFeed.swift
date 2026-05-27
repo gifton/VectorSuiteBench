@@ -26,10 +26,10 @@ struct CalibrationStatusFeed: View {
             }
             .background(VSB.Surface.s0)
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: VSB.Radius.card, style: .continuous)
                     .strokeBorder(VSB.Surface.hair, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: VSB.Radius.card, style: .continuous))
             .onChange(of: lines.count) { _, _ in
                 guard let last = lines.last else { return }
                 withAnimation(.easeOut(duration: 0.15)) {

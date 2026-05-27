@@ -84,4 +84,29 @@ enum VSB {
     /// Soft VectorCore tint — used for selected-row highlights, accent pill
     /// backgrounds, and the "feasible region" fill below Roofline ceilings.
     static let accentSoft   = Color(.sRGB, red: 0/255, green: 201/255, blue: 211/255, opacity: 0.18)
+
+    /// Corner-radius scale. Four steps cover every rounded surface the
+    /// app draws today; the names describe the surface's *role*, not
+    /// the literal pixel value, so a future visual review can adjust
+    /// one constant without hunting through view code.
+    ///
+    /// **`nonisolated`** because `CGFloat` constants don't need actor
+    /// isolation — and nonisolated `static let` is callable from any
+    /// context, including the `Layout`-protocol implementations
+    /// (`FlowLayout`) and the test target.
+    enum Radius {
+        /// 10×10 implementation swatches. Smallest decoration; barely
+        /// rounded but enough to soften the square pixel grid.
+        static let swatch: CGFloat = 1.5
+        /// Status pills, mode pills, size pills — anything the design
+        /// doc treats as a "pill" (capsule-adjacent, tight padding).
+        static let pill: CGFloat = 3
+        /// Selectable grid chips: Ops `CheckboxChip`, Impls `ImplChip`,
+        /// the preset segmented control. One step up from `pill` to
+        /// match the chips' larger padding + heavier border.
+        static let chip: CGFloat = 4
+        /// Card surfaces: the calibration terminal-feed card; future
+        /// modal sections that read as cards (none yet but reserved).
+        static let card: CGFloat = 6
+    }
 }

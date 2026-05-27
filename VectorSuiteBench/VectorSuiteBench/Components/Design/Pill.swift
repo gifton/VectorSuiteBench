@@ -53,10 +53,10 @@ struct Pill: View {
         .padding(.vertical, 3)
         .background(style.background)
         .overlay(
-            RoundedRectangle(cornerRadius: 3, style: .continuous)
+            RoundedRectangle(cornerRadius: VSB.Radius.pill, style: .continuous)
                 .strokeBorder(style.border, style: style.borderStyle)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: VSB.Radius.pill, style: .continuous))
     }
 
     @ViewBuilder
