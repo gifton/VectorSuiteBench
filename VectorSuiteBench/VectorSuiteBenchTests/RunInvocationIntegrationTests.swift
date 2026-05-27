@@ -84,11 +84,39 @@ struct RunInvocationIntegrationTests {
         #expect(index.runs.count == 1)
     }
 
+    @Test("cancel() on an in-flight run path produces a valid document")
+    func cancelInflightProducesValidDocument() async throws {
+        // Exercises the `cancel()` method path the toolbar's
+        // `◼ Cancel` button calls — distinct from
+        // `preCancelledRunStillProducesValidDocument`, which uses the
+        // `cancellationOverride` test seam. Same end state (cancellation
+        // produces a valid document) via a different code path.
+        //
+        // Calling `cancel()` immediately after `start()` is
+        // deterministic on the MainActor: `start()` spawns the Task
+        // but the Task body cannot run until we yield MainActor at
+        // `await invocation.waitForCompletion()` — so the token is
+        // cancelled before `controller.run()` checks it.
+        let tmp = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = RunStore(rootURL: tmp)
+        let invocation = RunInvocation(store: store)
+        let config = makeMinimalConfig()
+
+        invocation.start(config: config, allowDebugBuildsForTesting: true)
+        invocation.cancel()
+        await invocation.waitForCompletion()
+
+        #expect(invocation.state == .idle)
+        let index = try store.loadIndex()
+        #expect(index.runs.count == 1)
+    }
+
     // MARK: - Empty-selection guard
 
     @Test("Empty registry (zero ops selected) → state becomes .failed with reason")
-    func emptySelectionFailsWithReason() {
-        let tmp = (try? makeTempDir()) ?? FileManager.default.temporaryDirectory
+    func emptySelectionFailsWithReason() throws {
+        let tmp = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
         let store = RunStore(rootURL: tmp)
         let invocation = RunInvocation(store: store)
@@ -104,11 +132,11 @@ struct RunInvocationIntegrationTests {
 
         // start() returns immediately and never spawns a Task when the
         // filtered registry is empty — state should be .failed already.
-        if case .failed(let reason) = invocation.state {
-            #expect(reason.contains("No workloads match"))
-        } else {
+        guard case .failed(let reason) = invocation.state else {
             Issue.record(Comment(rawValue: "expected .failed state; got \(invocation.state)"))
+            return
         }
+        #expect(reason.contains("No workloads match"))
         #expect(invocation.failureReason != nil)
     }
 
@@ -123,20 +151,19 @@ struct RunInvocationIntegrationTests {
         let config = makeMinimalConfig()
 
         invocation.start(config: config, allowDebugBuildsForTesting: true)
-        let firstRunID: String? = {
-            if case .running(let id) = invocation.state { return id }
-            return nil
-        }()
-        #expect(firstRunID != nil)
+        guard case .running(let firstRunID) = invocation.state else {
+            Issue.record(Comment(rawValue: "expected .running after first start; got \(invocation.state)"))
+            return
+        }
 
         // Try to start another run — should not spawn a new task or
         // change runID.
         invocation.start(config: config, allowDebugBuildsForTesting: true)
-        if case .running(let id) = invocation.state {
-            #expect(id == firstRunID, Comment(rawValue: "second start must not replace the in-flight runID"))
-        } else {
-            Issue.record(Comment(rawValue: "expected still .running; got \(invocation.state)"))
+        guard case .running(let secondRunID) = invocation.state else {
+            Issue.record(Comment(rawValue: "expected still .running after concurrent start attempt; got \(invocation.state)"))
+            return
         }
+        #expect(secondRunID == firstRunID, Comment(rawValue: "second start must not replace the in-flight runID"))
 
         // Drain the in-flight task so the test doesn't leave background
         // work running.

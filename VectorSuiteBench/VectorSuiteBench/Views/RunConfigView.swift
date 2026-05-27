@@ -32,6 +32,14 @@ struct RunConfigView: View {
     /// stop the benchmark.
     let invocation: RunInvocation
 
+    /// `true` after the user has clicked Start at least once in this
+    /// sheet session. Gates the inline error banner: when the user
+    /// hasn't tried to start yet, the LiveStateChip's red state from
+    /// a *prior* run shouldn't pollute the sheet UI. Once the user
+    /// clicks Start, any sync failure becomes "their failure" and
+    /// gets surfaced inline.
+    @State private var didAttemptStart = false
+
     /// Native SwiftUI dismissal. Replaces an earlier `onDismiss` closure
     /// parameter — `.dismiss` is the macOS-idiomatic path and it covers
     /// the three dismissal triggers (Cancel button, Escape key,
@@ -68,10 +76,47 @@ struct RunConfigView: View {
                 }
             }
             Divider().background(VSB.Surface.divider)
+            if didAttemptStart, let reason = invocation.failureReason {
+                errorBanner(reason)
+            }
             footer
         }
         .frame(width: 980, height: 720)
         .background(VSB.Surface.bg)
+    }
+
+    // MARK: - Error banner (synchronous-failure surface)
+
+    /// Inline warn-tinted banner that surfaces an `invocation.failed`
+    /// reason when the user has clicked Start in this sheet session
+    /// and the start failed synchronously (e.g. empty registry). The
+    /// banner stays scoped to this sheet — opening a fresh sheet
+    /// resets `didAttemptStart`, so stale failures from prior async
+    /// runs don't bleed into a new configure session. Visual treatment
+    /// mirrors the `ThermalBanner` in `RunSummaryHeader`.
+    private func errorBanner(_ reason: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(VSB.Status.warn)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Start failed").vsbBody(color: VSB.Status.warn)
+                Text(reason).vsbMonoSha(color: VSB.Text.md)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(VSB.Status.warn.opacity(0.10))
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundStyle(VSB.Status.warn.opacity(0.33)),
+            alignment: .bottom
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("Start failed. \(reason)"))
     }
 
     // MARK: - Title bar
@@ -419,16 +464,26 @@ struct RunConfigView: View {
         Text("·").vsbMonoSha()
     }
 
-    /// `Start ⌘↵` — emphasized primary per design doc. Wired in
-    /// Item 4c: tap → `invocation.start(config:)` → sheet dismisses
-    /// → the run executes in the background while the toolbar's
-    /// `LiveStateChip` reflects state and the `+ New Run` button
-    /// swaps to `◼ Cancel`. Disabled while a run is already in
+    /// `Start ⌘↵` — emphasized primary per design doc. Tap →
+    /// `invocation.start(config:)` → **if the run started**, dismiss
+    /// the sheet (background execution; toolbar's `LiveStateChip`
+    /// reflects state, `+ New Run` swaps to `◼ Cancel`). **If the
+    /// start failed synchronously** (e.g. empty registry filter), the
+    /// sheet stays open and the inline `errorBanner` surfaces the
+    /// reason so the user can fix the config without hunting for the
+    /// toolbar chip's tooltip. Disabled while a run is already in
     /// flight (no concurrent runs).
     private var startButton: some View {
         Button {
+            didAttemptStart = true
             invocation.start(config: config)
-            dismiss()
+            if invocation.isRunning {
+                dismiss()
+            }
+            // Else: start() set state to .failed synchronously
+            // (or the run was already in flight, but the .disabled
+            // guard below prevents the button from firing in that
+            // case). Keep the sheet open so `errorBanner` can render.
         } label: {
             HStack(spacing: 6) {
                 Text("Start")

@@ -25,7 +25,7 @@ import BenchKit
 /// sidebar's toolbar slot — `RunListSidebar` uses the standard `List` +
 /// `.navigationTitle(_:)` pattern and renders correctly with the inset.
 struct AppRoot: View {
-    @State private var coordinator = RunStoreCoordinator.makeDefault()
+    @State private var coordinator: RunStoreCoordinator
     @State private var selectedRunID: String? = nil
     @State private var calibration = CalibrationStatus()
     /// New Run sheet presentation flag. Driven by the toolbar's
@@ -41,6 +41,13 @@ struct AppRoot: View {
     @State private var invocation: RunInvocation
     private let hardware: HardwareInventory = HardwareInventory.probe()
 
+    /// All `@State` properties without property-declaration defaults are
+    /// initialized here so `RunStoreCoordinator.makeDefault()` runs
+    /// exactly once. Earlier the property declaration had a default
+    /// initializer AND `init()` reassigned `_coordinator`, which fired
+    /// `makeDefault()` twice per AppRoot construction (the default ran
+    /// first, then was discarded). `makeDefault()` opens a RunStore and
+    /// scans index.json off disk; not free.
     init() {
         let coordinator = RunStoreCoordinator.makeDefault()
         _coordinator = State(initialValue: coordinator)

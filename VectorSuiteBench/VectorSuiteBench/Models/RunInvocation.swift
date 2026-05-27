@@ -173,34 +173,44 @@ final class RunInvocation {
         }
     }
 
-    /// Map `RunConfig`'s preset + budget settings to a BenchKit
-    /// `RunPreset`. We always pass `.custom(...)` so the user's
-    /// budget / sample-count choices reach `RunController` — even
-    /// when `config.preset` is `.smoke` / `.standard` / `.full`, the
-    /// user may have toggled a budget axis after selecting the preset
-    /// (the preset chip would have flipped to `.custom` then).
+    /// Map `RunConfig`'s preset selection to a BenchKit `RunPreset`.
+    /// Honors `config.preset` directly: when the user picked one of the
+    /// canned presets (`.smoke` / `.standard` / `.full`) and hasn't
+    /// touched anything since (any subsequent change would have flipped
+    /// the chip to `.custom`), we pass the matching BenchKit preset so
+    /// `RunController.generatedRunID(preset:)` produces a sidebar
+    /// label that matches user intent. Only the `.custom` path bakes
+    /// the user's budget + sample-count axes into a fresh
+    /// `RunPreset.custom(...)` payload.
     private func makeBenchPreset(
         from config: RunConfig,
         registry: [any RunnableWorkload]
     ) -> BenchKit.RunPreset {
-        let budget = BenchKit.WallClockBudget(
-            total: .seconds(config.totalBudget.seconds),
-            perCase: .milliseconds(Int(config.perCaseBudget.seconds * 1000)),
-            abortPolicy: benchAbortPolicy(config.abortPolicy)
-        )
-        // Both upper bounds get the user's sample count; the runner
-        // auto-tunes the actual N per case based on observed cost.
-        let sampleCount = BenchKit.SampleCount(
-            singleShotMax: config.sampleCount.count,
-            amortizedSamples: config.modes.asModes.contains(.amortized)
-                ? config.sampleCount.count
-                : 0
-        )
-        // `ids` is documentation-only on the BenchKit side — RunController
-        // iterates `registry` directly. Passing the filtered IDs keeps the
-        // run manifest honest about what was configured.
-        let ids = registry.map(\.identifier)
-        return .custom(budget: budget, sampleCount: sampleCount, ids: ids)
+        switch config.preset {
+        case .smoke:    return .smoke
+        case .standard: return .standard
+        case .full:     return .full
+        case .custom:
+            let budget = BenchKit.WallClockBudget(
+                total: .seconds(config.totalBudget.seconds),
+                perCase: .milliseconds(Int(config.perCaseBudget.seconds * 1000)),
+                abortPolicy: benchAbortPolicy(config.abortPolicy)
+            )
+            // Both upper bounds get the user's sample count; the runner
+            // auto-tunes the actual N per case based on observed cost.
+            let sampleCount = BenchKit.SampleCount(
+                singleShotMax: config.sampleCount.count,
+                amortizedSamples: config.modes.asModes.contains(.amortized)
+                    ? config.sampleCount.count
+                    : 0
+            )
+            // `ids` is documentation-only on the BenchKit side —
+            // RunController iterates `registry` directly. Passing the
+            // filtered IDs keeps the run manifest honest about what
+            // was configured.
+            let ids = registry.map(\.identifier)
+            return .custom(budget: budget, sampleCount: sampleCount, ids: ids)
+        }
     }
 
     private func benchAbortPolicy(_ policy: AbortPolicy) -> BenchKit.WallClockBudget.AbortPolicy {
