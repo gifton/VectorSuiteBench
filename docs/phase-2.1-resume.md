@@ -14,13 +14,15 @@ phase is now UI implementation against a locked design doc.
 
 - Repo: /Users/goftin/dev/gsuite/VectorSuiteBench · main · push authorized
 - GitHub: gifton/VectorSuiteBench
-- Last commit (after Item 3c): see `git log -1 --oneline`
+- Last commit (after Item 3d): see `git log -1 --oneline`
 - Tests: ~180 total. ~89 in the Xcode app target (DeltaGlyphTests,
   NumberCellSanitizeTests, RunStoreCoordinatorTests, RunProgressTests,
   RunSummaryGroupingTests, CalibrationStatusTests,
   RunSummaryFormattersTests, CaseTableFilterTests,
-  **ChartDataBuilderTests** — +11 from Item 3c's chart-data tests),
-  plus 91 across the BenchKit/VSBCore/VSBRun SwiftPM packages.
+  ChartDataBuilderTests), plus 91 across the BenchKit/VSBCore/VSBRun
+  SwiftPM packages. **Item 3d added no tests** — UI-only placeholder
+  chrome; the `LiveState` enum has trivial pure-value semantics
+  covered by exhaustive switches.
 - SchemaVersion is 1.2. `RunMetadata.wallTimeNanos: UInt64?` and
   `RunSummary.wallTimeNanos: UInt64?` are populated by
   `RunController.run()` from the queue's start/end clock ticks.
@@ -44,10 +46,13 @@ phase is now UI implementation against a locked design doc.
   (FirstLaunchView + CalibrationStatus), 3a (RunSummaryHeader + 7-cell
   grid + HardwareFingerprintPopover + thermal banner + RunDetailView
   shell), 3b (CaseTable — 8-column data table with 6 row treatments
-  + CaseRowBuilder + CaseTableFilter shared with 3c), **3c**
+  + CaseRowBuilder + CaseTableFilter shared with 3c), 3c
   (ThroughputBarChart + ChartsPane 5-slot picker + Table ⟷ Charts
-  toggle in RunDetailView; chart honors the shared filter).
-  Remaining: 3d, 4a, 4b, 4c.
+  toggle in RunDetailView; chart honors the shared filter), **3d**
+  (window-level AppToolbar with 4 disabled buttons + LiveStateChip;
+  keyboard shortcuts reserved on disabled buttons so 4a's New Run
+  ⌘N activation needs no retraining).
+  Remaining: 4a, 4b, 4c.
 - **Known Xcode quirk**: `xcodebuild ... test` fails at the test-target
   link step (unable to find BenchKit symbols). cmd-U from Xcode IDE
   works (presumably via scheme-level framework linking that diverges
@@ -88,32 +93,49 @@ phase is now UI implementation against a locked design doc.
      VectorSuiteBench/VectorSuiteBench/AppRoot.swift  ← placeholder sidebar
                                                        to be replaced.
 
-## Recommended sequence (2 sub-items → close 2.1)
+## Recommended sequence (1 sub-item → close 2.1)
 
-  1. **Item 3d — Diff toolbar placeholder.** Small: add the `⇋ Compare`
-     button to the toolbar; mark it disabled with a "Coming in 2.2"
-     tooltip. Reserves chrome real estate per the design doc so 2.2
-     lands without re-shuffling.
+  1. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
+     This is the last chunk; closes Phase 2.1.
 
-  2. **Item 4a → 4b → 4c** — New Run modal + RunController integration.
+## First concrete task: Item 4a — Modal shell (Static layout, no logic)
 
-## First concrete task: Item 3d — Diff toolbar placeholder
+Item 4a is the static-layout pass of the New Run modal (`RunConfigView`).
+Per plan §4 the sheet is 980 × 720, dropped from the titlebar, with five
+sections + a sticky live-estimate footer. 4a delivers the visual
+fidelity; 4b wires the estimator; 4c wires `RunController`.
 
-Tiny scope. Add a `⇋ Compare` button to the run-detail toolbar (or
-window-level toolbar — design doc §04 shows it as window chrome) and
-mark it **disabled** with a "Coming in 2.2" tooltip. Locked decision
-§1.5/4 pins the eventual visual (merged delta table with `▼` / `▲`
-glyphs), but the underlying `BenchKit.RunDiff` is the only piece that
-lights up in 2.2 — 3d just reserves the affordance.
+Five sections, all rendered with placeholder selected state:
 
-Files to create/modify:
-- `VectorSuiteBench/AppRoot.swift` or a new `Views/RunDetailToolbar.swift`
-  — adding the disabled `⇋ Compare` button.
+1. **Preset** — Smoke / Standard / Full / Custom segmented control.
+2. **Operations** — 4-column grid of Checkbox chips (op name + math
+   shorthand, e.g. `dot · ∑ aᵢbᵢ`).
+3. **Implementations** — 2-column grid of `ImplChip`s.
+4. **Vector sizes** — horizontally-wrapping pill grid at log-spaced
+   powers of 2 (`16 · 32 · 64 · ... · 16M`).
+5. **Budgets** — 3 × 2 grid of native-style select fields with mono
+   captions.
 
-No new tests required (UI-only placeholder). Test count holds at ~180.
+Sticky footer: `~342 cases · ~4m 50s · ~12 MB JSON` (placeholder values
+in 4a; 4b makes them live).
 
-After 3d, the only remaining work is Items 4a → 4b → 4c (New Run
-modal + RunController integration) which closes Phase 2.1.
+`+ New Run` toolbar button in `AppToolbar.swift` is already in place
+(disabled, ⌘N reserved). Flip `.disabled(true) → .disabled(false)` and
+wire the action to present the sheet — that's the trigger seam.
+
+Files to create:
+- `Views/RunConfigView.swift` — the sheet shell + 5 sections.
+- `Views/ImplChip.swift` — 2-column-grid impl chip atom.
+- `Views/PresetSegmentedControl.swift` — preset picker.
+- `Views/LiveEstimateFooter.swift` — sticky footer (placeholder copy
+  until 4b).
+
+Files to modify:
+- `AppToolbar.swift` — enable the New Run button, present sheet on tap.
+- `AppRoot.swift` — hold sheet-presented state.
+
+Target tests after 4a: holds at ~180. 4a is layout-only; 4b adds tests
+for the estimator.
 
 ## Conventions (don't violate)
 
@@ -163,15 +185,15 @@ modal + RunController integration) which closes Phase 2.1.
 
 ## Begin
 
-1. Read docs/phase-2.1-plan.md §2 Item 3d, §1.5/4 (the locked diff
-   visual), §6 (deferral language for Compare mode).
-2. Read docs/design/phase-2.1-design.html §04 "Toolbar" for the
-   button's chrome placement.
-3. Skim VectorSuiteBench/VectorSuiteBench/AppRoot.swift to find the
-   right home for the toolbar button (either app-level toolbar or a
-   detail-pane local toolbar).
-4. Add the disabled `⇋ Compare` button → commit → push.
-5. Then Item 4a (modal shell).
+1. Read docs/phase-2.1-plan.md §2 Item 4 (sub-items 4a / 4b / 4c) +
+   §2.5 steps 11–13.
+2. Read docs/design/phase-2.1-design.html §05 "New Run modal" for the
+   sheet layout (980 × 720, 180 px label gutter, 5 sections, sticky
+   footer).
+3. Skim VectorSuiteBench/VectorSuiteBench/Views/AppToolbar.swift to
+   see the `newRunButton` seam — flip `.disabled(true) → .disabled(false)`
+   and wire its action to present `RunConfigView`.
+4. Build 4a (modal shell) → commit → push → then 4b → then 4c.
 
 If anything reads ambiguous, stop and ask — the locked decisions are
 NOT ambiguous, but the design doc is silent on a few sub-decisions

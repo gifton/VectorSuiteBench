@@ -47,6 +47,14 @@ struct AppRoot: View {
             coordinator.stopWatching()
         }
         .environment(coordinator)
+        .toolbar {
+            // Window-level chrome (design doc §04 "Toolbar"). Buttons are
+            // disabled placeholders in 2.1; phase mapping lives in
+            // `AppToolbar.swift`. `.idle` is hard-coded until Item 4c
+            // exposes a `RunProgress` observable for the app to read —
+            // the seam (`LiveState` enum) is already in place.
+            AppToolbar(hardware: hardware, liveState: .idle)
+        }
     }
 
     // MARK: - Detail routing
