@@ -321,12 +321,24 @@ struct RunConfigView: View {
 
     // MARK: - Footer
 
-    /// Sticky bottom strip. Live-estimate trio on the left (em-dash
-    /// placeholders in 4a; 4b makes them live), Cancel + Start on the
-    /// right.
+    /// Sticky bottom strip. Live-estimate trio on the left + breakdown
+    /// caption, Cancel + Start on the right.
+    ///
+    /// **Accessibility.** The estimate cells + breakdown are grouped
+    /// under one `.accessibilityElement(children: .combine)` so
+    /// VoiceOver reads them as a single coherent sentence — engineers
+    /// hear "Estimated 342 cases, 4m 50s, 12 MB JSON. 5 ops · 5 impls
+    /// · 7 sizes · shot + loop." instead of five fragmented chunks.
+    /// Cancel + Start stay as native buttons with their own a11y.
     private var footer: some View {
-        HStack(spacing: 16) {
-            estimateBlock
+        let estimate = RunConfigEstimator.estimate(config)
+        return HStack(spacing: 16) {
+            HStack(spacing: 16) {
+                estimateBlock(estimate)
+                breakdownCaption(estimate.breakdown)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(footerAccessibilityLabel(estimate)))
             Spacer()
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(".", modifiers: .command)
@@ -338,32 +350,63 @@ struct RunConfigView: View {
         .background(VSB.Surface.s0)
     }
 
+    /// VoiceOver label for the footer estimate block. Composes the
+    /// already-formatted cells into one phrase plus the breakdown.
+    private func footerAccessibilityLabel(_ estimate: RunConfigEstimator.Estimate) -> String {
+        let cases = estimate.cases == 1 ? "1 case" : "\(estimate.cases) cases"
+        let wall = RunConfigEstimator.formatWall(estimate.wallSeconds)
+        let bytes = "\(RunConfigEstimator.formatBytes(estimate.bytes)) \(RunConfigEstimator.formatBytesUnit(estimate.bytes))"
+        return "Estimated \(cases), \(wall), \(bytes). \(estimate.breakdown)."
+    }
+
     /// Three accent-colored numerics matching the design doc §05 footer
-    /// shape (`~342 cases · ~4m 50s · ~12 MB JSON`). In 4a all three
-    /// cells render as `—` placeholders; 4b wires the live estimator.
+    /// shape (`~342 cases · ~4m 50s · ~12 MB JSON`). When the
+    /// configuration produces zero cases, every cell renders `0` /
+    /// `0s` / `0 KB JSON` honestly — surfacing that the user has
+    /// configured an empty run rather than hiding the value.
     ///
     /// **Cell shape varies by metric.** The cases cell + bytes cell have
     /// a trailing unit label (`cases` / `MB JSON`); the wall-clock cell
     /// is a composite duration string (`4m 50s`) with no separate unit
     /// because the duration's `m`/`s` are baked into the value itself.
     /// Modeled here as `unit: String?` — nil = no trailing label.
-    private var estimateBlock: some View {
+    private func estimateBlock(_ estimate: RunConfigEstimator.Estimate) -> some View {
         HStack(spacing: 8) {
-            estimateCell(value: "—", unit: "cases")
+            // No `~` prefix on cases — the case count is the exact
+            // Cartesian product of the user's selections, not an
+            // estimate. Only `wall` and `bytes` carry the tilde because
+            // those are roughed via the uniform-per-mode model.
+            estimateCell(
+                value: RunConfigEstimator.formatCases(estimate.cases),
+                unit: estimate.cases == 1 ? "case" : "cases"
+            )
             dot
-            estimateCell(value: "—", unit: nil)
+            estimateCell(
+                value: "~\(RunConfigEstimator.formatWall(estimate.wallSeconds))",
+                unit: nil
+            )
             dot
-            estimateCell(value: "—", unit: "MB JSON")
+            estimateCell(
+                value: "~\(RunConfigEstimator.formatBytes(estimate.bytes))",
+                unit: RunConfigEstimator.formatBytesUnit(estimate.bytes)
+            )
         }
     }
 
     private func estimateCell(value: String, unit: String?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(value).vsbMonoNumber(color: VSB.Impl.vectorCore.opacity(0.5))
+            Text(value).vsbMonoNumber(color: VSB.Impl.vectorCore)
             if let unit {
                 Text(unit).vsbMonoSha()
             }
         }
+    }
+
+    /// `"5 ops · 5 impls · 7 sizes · shot + loop"` — explains the
+    /// arithmetic behind the case count. Sits right of the main
+    /// estimate trio; same line, smaller font, demoted color.
+    private func breakdownCaption(_ text: String) -> some View {
+        Text(text).vsbMonoSha()
     }
 
     private var dot: some View {
