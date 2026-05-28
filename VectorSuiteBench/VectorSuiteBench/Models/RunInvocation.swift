@@ -93,7 +93,17 @@ final class RunInvocation {
     ) {
         guard !isRunning else { return }
 
-        let registry = filteredRegistry(for: config)
+        // Preset filter narrows the full registry per spec §3 (e.g., Smoke
+        // pins dim 512 + VectorCore-optimized + Accelerate + naive). User
+        // axes then narrow further. In practice the preset chip flips to
+        // .custom as soon as the user touches an axis, so the preset filter
+        // is restrictive only on the canned presets where the auto-fill
+        // axes exactly match the preset's allow-list. Building the BenchKit
+        // preset happens AFTER user-axes filtering so `.custom.ids` (the
+        // manifest payload documenting what ran) reflects the actual case
+        // set, not the full registry.
+        let presetFiltered = presetFilteredWorkloads(VSBCoreRegistry.workloads, for: config)
+        let registry = filteredRegistry(presetFiltered, for: config)
         if registry.isEmpty {
             state = .failed(reason: "No workloads match the current configuration. Adjust ops / impls / sizes and try again.")
             return
@@ -152,16 +162,32 @@ final class RunInvocation {
         state = newState
     }
 
-    /// Filter `VSBCoreRegistry.workloads` by the user's selections.
+    /// Apply the preset's filter rules per BenchKit `RunPreset.filter(_:)`.
+    /// `.custom` is identity (the user has hand-picked axes; preset
+    /// machinery doesn't second-guess them); other cases delegate to the
+    /// corresponding BenchKit preset's filter.
+    private func presetFilteredWorkloads(
+        _ workloads: [any RunnableWorkload],
+        for config: RunConfig
+    ) -> [any RunnableWorkload] {
+        switch config.preset {
+        case .smoke:         return BenchKit.RunPreset.smoke.filter(workloads)
+        case .standard:      return BenchKit.RunPreset.standard.filter(workloads)
+        case .full, .custom: return workloads
+        }
+    }
+
+    /// Filter a pre-narrowed workload list by the user's RunConfig axes.
     /// Mirrors `vsb-run`'s CLI filter logic but takes the typed
     /// `RunConfig` axes (Sets) instead of stringly-typed argv tokens.
     ///
     /// **Shape matching**: vector(n), pairwise(_, n), matrix(_, n) all
-    /// match against `config.sizes` by inner dim. Phase 1's registry
-    /// is dot-family-only; non-`.dot` ops simply yield zero workloads
-    /// today (and naturally light up as Phase 2.2+ adds families).
-    private func filteredRegistry(for config: RunConfig) -> [any RunnableWorkload] {
-        VSBCoreRegistry.workloads.filter { workload in
+    /// match against `config.sizes` by inner dim.
+    private func filteredRegistry(
+        _ workloads: [any RunnableWorkload],
+        for config: RunConfig
+    ) -> [any RunnableWorkload] {
+        workloads.filter { workload in
             let id = workload.identifier
             guard config.ops.contains(id.op) else { return false }
             guard config.impls.contains(id.impl) else { return false }

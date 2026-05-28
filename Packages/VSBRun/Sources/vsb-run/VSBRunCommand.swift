@@ -112,19 +112,24 @@ struct VSBRun: AsyncParsableCommand {
     }
 
     private func filteredRegistry() -> [any RunnableWorkload] {
-        let all = VSBCoreRegistry.workloads
-        guard !filter.isEmpty else { return all }
+        // Preset filter narrows the full registry per spec §3 (e.g., Smoke
+        // selects dot/l2dist/cosine × VectorCore-optimized + Accelerate +
+        // naive at dim 512). User --filter args then narrow further within
+        // the preset selection — running `--preset smoke --filter naive`
+        // takes the Smoke selection and keeps only the naive-impl cases.
+        let presetFiltered = preset.runPreset.filter(VSBCoreRegistry.workloads)
+        guard !filter.isEmpty else { return presetFiltered }
         let opFilter = Set(filter.compactMap { OpKind(rawValue: $0) })
         let implFilter = Set(filter.compactMap { ImplKind(rawValue: $0) })
         // If the user supplied filter strings but NONE of them parsed to a
         // known OpKind or ImplKind, that's a typo — not "match everything".
         // Returning [] here trips the empty-registry exit-2 path so the
-        // user sees the error rather than silently running the full
-        // registry under what they thought was a filter.
+        // user sees the error rather than silently running the preset
+        // selection under what they thought was a filter.
         if opFilter.isEmpty && implFilter.isEmpty {
             return []
         }
-        return all.filter { workload in
+        return presetFiltered.filter { workload in
             let id = workload.identifier
             let opMatches  = opFilter.isEmpty  || opFilter.contains(id.op)
             let implMatches = implFilter.isEmpty || implFilter.contains(id.impl)
