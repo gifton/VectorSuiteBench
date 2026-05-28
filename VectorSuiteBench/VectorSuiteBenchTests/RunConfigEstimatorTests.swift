@@ -264,10 +264,99 @@ struct RunConfigEstimatorTests {
                 implsCount: config.impls.count,
                 sizesCount: config.sizes.count,
                 modes: config.modes,
-                sampleCount: config.sampleCount.count
+                sampleCount: config.sampleCount.count,
+                opWeightAverage: RunConfigEstimator.averageOpWeight(config.ops)
             )
         )
         #expect(viaConfig == viaInputs)
+    }
+
+    // MARK: - Per-op weight scaling
+
+    @Test("opWeightAverage = 1.0 default preserves baseline (dot-only equivalent)")
+    func opWeightDefaultMatchesBaseline() {
+        // Two identical inputs — one with implicit default opWeightAverage,
+        // one with explicit 1.0. Identical estimates confirm the default
+        // matches the dot-only baseline.
+        let implicitDefault = RunConfigEstimator.Inputs(
+            opsCount: 3, implsCount: 4, sizesCount: 2, modes: .both, sampleCount: 500
+        )
+        let explicitBaseline = RunConfigEstimator.Inputs(
+            opsCount: 3, implsCount: 4, sizesCount: 2, modes: .both, sampleCount: 500,
+            opWeightAverage: 1.0
+        )
+        #expect(RunConfigEstimator.estimate(inputs: implicitDefault)
+                == RunConfigEstimator.estimate(inputs: explicitBaseline))
+    }
+
+    @Test("Higher opWeightAverage scales wall (SHOT + LOOP) proportionally")
+    func opWeightScalesWall() {
+        let baseline = RunConfigEstimator.Inputs(
+            opsCount: 3, implsCount: 4, sizesCount: 2, modes: .both, sampleCount: 500,
+            opWeightAverage: 1.0
+        )
+        let heavy = RunConfigEstimator.Inputs(
+            opsCount: 3, implsCount: 4, sizesCount: 2, modes: .both, sampleCount: 500,
+            opWeightAverage: 10.0
+        )
+        let baseWall = RunConfigEstimator.estimate(inputs: baseline).wallSeconds
+        let heavyWall = RunConfigEstimator.estimate(inputs: heavy).wallSeconds
+        // 10× weight → 10× wall. Both SHOT and LOOP contributions scale.
+        #expect(heavyWall.isApproximatelyEqual(to: baseWall * 10, relativeTolerance: 0.001),
+                Comment(rawValue: "10× weight should yield 10× wall; base=\(baseWall) heavy=\(heavyWall)"))
+    }
+
+    @Test("opWeightAverage does NOT affect case count or bytes")
+    func opWeightLeavesCasesAndBytesAlone() {
+        let baseline = RunConfigEstimator.Inputs(
+            opsCount: 3, implsCount: 4, sizesCount: 2, modes: .both, sampleCount: 500,
+            opWeightAverage: 1.0
+        )
+        let heavy = RunConfigEstimator.Inputs(
+            opsCount: 3, implsCount: 4, sizesCount: 2, modes: .both, sampleCount: 500,
+            opWeightAverage: 100.0
+        )
+        let base = RunConfigEstimator.estimate(inputs: baseline)
+        let hi = RunConfigEstimator.estimate(inputs: heavy)
+        #expect(base.cases == hi.cases, Comment(rawValue: "opWeight is a wall multiplier; case count is structural"))
+        #expect(base.bytes == hi.bytes, Comment(rawValue: "opWeight does not change per-case JSON size"))
+    }
+
+    @Test("opWeights table covers every OpKind (registry-completeness)")
+    func opWeightsCoverEveryOpKind() {
+        // Each OpKind must have an entry in the weight table; otherwise
+        // a user selecting a newly-added op silently falls back to the
+        // averageOpWeight default and the estimator silently mis-predicts.
+        // A missing entry is a registry bug we want to catch at test time.
+        for op in OpKind.allCases {
+            #expect(RunConfigEstimator.opWeights[op] != nil,
+                    Comment(rawValue: "OpKind.\(op.rawValue) missing from RunConfigEstimator.opWeights"))
+        }
+    }
+
+    @Test("averageOpWeight of empty set returns the 1.0 baseline (no divide-by-zero)")
+    func averageOpWeightOfEmptySetIsBaseline() {
+        let empty: Set<OpKind> = []
+        #expect(RunConfigEstimator.averageOpWeight(empty) == 1.0)
+    }
+
+    @Test("averageOpWeight of dot-only matches the dot weight exactly")
+    func averageOpWeightOfDotOnly() {
+        let dotOnly: Set<OpKind> = [.dot]
+        let avg = RunConfigEstimator.averageOpWeight(dotOnly)
+        #expect(avg == RunConfigEstimator.opWeights[.dot])
+    }
+
+    @Test("averageOpWeight of mixed selection produces the arithmetic mean")
+    func averageOpWeightOfMixedSelection() {
+        // Pick a heavy op (distanceMatrix=500) and a light op (axpy=0.8).
+        // Mean = (500 + 0.8) / 2 = 250.4.
+        let mixed: Set<OpKind> = [.distanceMatrix, .axpy]
+        let expected = (RunConfigEstimator.opWeights[.distanceMatrix]! +
+                        RunConfigEstimator.opWeights[.axpy]!) / 2.0
+        let actual = RunConfigEstimator.averageOpWeight(mixed)
+        #expect(actual.isApproximatelyEqual(to: expected, relativeTolerance: 1e-12),
+                Comment(rawValue: "expected mean \(expected); got \(actual)"))
     }
 }
 

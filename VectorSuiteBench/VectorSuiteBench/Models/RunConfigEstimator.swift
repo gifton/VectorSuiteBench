@@ -44,14 +44,15 @@ nonisolated enum RunConfigEstimator {
 
     // MARK: - Constants (refine when 4c provides recalibration data)
 
-    /// SHOT per-sample time. Uniform across ops/impls/sizes — we don't
-    /// have real per-op data for 7 of 8 ops, and modeling them as
-    /// hand-tuned guesses would look authoritative in code without
-    /// justification. 100 ns is the order of magnitude observed in
+    /// SHOT per-sample time at the **`dot` baseline**. Multiplied by
+    /// `Inputs.opWeightAverage` so per-op cost differences are reflected
+    /// when the user's selection mixes vector ops with the (much pricier)
+    /// async families. 100 ns is the order of magnitude observed in
     /// Phase 2.0's `dot` smoke run.
     static let shotNanosPerSample: Double = 100
 
-    /// LOOP per-case wall time. The K-iteration loop runs ≥100 µs to
+    /// LOOP per-case wall time at the **`dot` baseline**. Same per-op
+    /// scaling caveat as above. The K-iteration loop runs ≥100 µs to
     /// clear clock resolution; ~100 loops + warm-up + thermal pauses
     /// land in the ~10–20 s range. 15 s is the midpoint.
     static let loopSecondsPerCase: Double = 15.0
@@ -61,6 +62,47 @@ nonisolated enum RunConfigEstimator {
     /// length of any memory trace, but the 32 KB constant covers the
     /// dot case at default sample count comfortably.
     static let bytesPerCase: Int = 32 * 1024
+
+    /// Per-op cost multiplier relative to `dot`. Used to inflate the
+    /// otherwise-uniform SHOT and LOOP estimates when async ops like
+    /// `distanceMatrix` dominate the selection. ±50 % accuracy per
+    /// plan §4 (Phase 1 design §3). Values are rough order-of-magnitude
+    /// guesses keyed off spec §9 cycles-per-case arithmetic:
+    /// - Borrowing-family vector ops (`dot`, `l2dist`, `cosine`,
+    ///   `normalize`, `axpy`) share `dot`'s arithmetic intensity to
+    ///   within a factor of ~2; weights stay near 1.
+    /// - `topK` partial-sorts across 1 K – 100 K candidates per call,
+    ///   so per-case cost is ~50× dot.
+    /// - `pairwiseDistances` and `distanceMatrix` compute M × N × D
+    ///   inner products per call; at spec §9 sizes those reach 3 M
+    ///   (Standard pairwise 64×64×768) up to 25 G ops
+    ///   (Full distanceMatrix 4096² × 1536). Picked to roughly match
+    ///   the ratio at Standard sizes.
+    /// - `null` (NullWorkload self-bench) is the harness floor and never
+    ///   appears in user-selected `OpKind` sets; included for
+    ///   completeness so an exhaustive switch on OpKind has a value.
+    static let opWeights: [OpKind: Double] = [
+        .dot:               1.0,
+        .l2dist:            1.0,
+        .cosine:            1.5,
+        .normalize:         0.8,
+        .axpy:              0.8,
+        .topK:              50.0,
+        .pairwiseDistances: 200.0,
+        .distanceMatrix:    500.0,
+        .null:              0.01,
+    ]
+
+    /// Mean weight across an arbitrary `OpKind` set. Defaults to 1.0
+    /// for an empty set so the wrapper's calculation doesn't divide by
+    /// zero (and so an empty-ops UI state produces the same wall as
+    /// dot-only — visually consistent with "you selected nothing,
+    /// the estimate is the baseline").
+    static func averageOpWeight(_ ops: Set<OpKind>) -> Double {
+        guard !ops.isEmpty else { return 1.0 }
+        let sum = ops.reduce(0.0) { $0 + (opWeights[$1] ?? 1.0) }
+        return sum / Double(ops.count)
+    }
 
     // MARK: - Estimate
 
@@ -74,6 +116,27 @@ nonisolated enum RunConfigEstimator {
         let sizesCount: Int
         let modes: ModesSelection
         let sampleCount: Int
+        /// Mean `OpKind` cost weight (vs `dot` baseline). The MainActor
+        /// wrapper derives it via `RunConfigEstimator.averageOpWeight(_:)`
+        /// over `config.ops`; tests hitting the pure overload leave it
+        /// at the 1.0 default unless asserting per-op scaling.
+        let opWeightAverage: Double
+
+        init(
+            opsCount: Int,
+            implsCount: Int,
+            sizesCount: Int,
+            modes: ModesSelection,
+            sampleCount: Int,
+            opWeightAverage: Double = 1.0
+        ) {
+            self.opsCount = opsCount
+            self.implsCount = implsCount
+            self.sizesCount = sizesCount
+            self.modes = modes
+            self.sampleCount = sampleCount
+            self.opWeightAverage = opWeightAverage
+        }
     }
 
     /// Pure-function estimator over plain values. `nonisolated` — same
@@ -92,8 +155,8 @@ nonisolated enum RunConfigEstimator {
         let modesActive = inputs.modes.asModes
         let shotCases = modesActive.contains(.singleShot) ? casesPerMode : 0
         let loopCases = modesActive.contains(.amortized) ? casesPerMode : 0
-        let shotWall = Double(shotCases) * Double(inputs.sampleCount) * shotNanosPerSample * 1e-9
-        let loopWall = Double(loopCases) * loopSecondsPerCase
+        let shotWall = Double(shotCases) * Double(inputs.sampleCount) * shotNanosPerSample * inputs.opWeightAverage * 1e-9
+        let loopWall = Double(loopCases) * loopSecondsPerCase * inputs.opWeightAverage
         let wallSeconds = shotWall + loopWall
 
         let bytes = cases * bytesPerCase
@@ -122,7 +185,8 @@ nonisolated enum RunConfigEstimator {
             implsCount: config.impls.count,
             sizesCount: config.sizes.count,
             modes: config.modes,
-            sampleCount: config.sampleCount.count
+            sampleCount: config.sampleCount.count,
+            opWeightAverage: averageOpWeight(config.ops)
         ))
     }
 
