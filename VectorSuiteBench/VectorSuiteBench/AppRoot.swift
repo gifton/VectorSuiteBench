@@ -39,6 +39,14 @@ struct AppRoot: View {
     /// sidebar polls. State drives the toolbar's `LiveStateChip` color
     /// + the `+ New Run` ↔ `◼ Cancel` button swap.
     @State private var invocation: RunInvocation
+    /// Diff-mode toggle. Flipped by the `⇋ Compare` toolbar button;
+    /// `RunDetailView` consumes via `@Binding` so the body swaps
+    /// to `DiffPaneView` while true (Item 2c).
+    @State private var isDiffMode: Bool = false
+    /// Diff selection state — `RunPickerView` mutates this; the
+    /// canonical instance lives here so it survives toggling Diff
+    /// mode off and back on without losing the user's last picks.
+    @State private var diffSelection: DiffSelection = DiffSelection()
     private let hardware: HardwareInventory = HardwareInventory.probe()
 
     /// All `@State` properties without property-declaration defaults are
@@ -81,7 +89,9 @@ struct AppRoot: View {
                 hardware: hardware,
                 liveState: invocation.liveState,
                 onNewRun: { isNewRunSheetPresented = true },
-                onCancel: { invocation.cancel() }
+                onCancel: { invocation.cancel() },
+                isDiffMode: isDiffMode,
+                onToggleDiff: { toggleDiffMode() }
             )
         }
         .sheet(isPresented: $isNewRunSheetPresented) {
@@ -117,7 +127,13 @@ struct AppRoot: View {
     @ViewBuilder
     private var runDetailOrHint: some View {
         if let id = selectedRunID {
-            RunDetailView(runID: id, coordinator: coordinator)
+            RunDetailView(
+                runID: id,
+                coordinator: coordinator,
+                isDiffMode: $isDiffMode,
+                summaries: coordinator.index.runs,
+                diffSelection: diffSelection
+            )
         } else {
             VStack(spacing: 8) {
                 Text("Select a run").vsbBody(color: VSB.Text.md)
@@ -130,6 +146,28 @@ struct AppRoot: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(VSB.Surface.bg)
         }
+    }
+
+    // MARK: - Diff-mode toggle
+
+    /// Flip Diff mode on/off. On entry, auto-pick the baseline as the
+    /// next-older sibling of the currently selected run (per locked
+    /// decision §1.5/5 + Item 2a Q&A). On exit, leave selection state
+    /// alone so re-entering Diff mode lands the user where they left
+    /// off (only the auto-pick fires on the first enter per session).
+    private func toggleDiffMode() {
+        if !isDiffMode {
+            // First entry — populate from sidebar selection. If the
+            // pair is already valid (user toggled off + on without
+            // changing runs), don't clobber their choice.
+            if diffSelection.baselineRunID == nil || diffSelection.comparisonRunID == nil {
+                diffSelection.enterDiffMode(
+                    currentSelection: selectedRunID,
+                    summaries: coordinator.index.runs
+                )
+            }
+        }
+        isDiffMode.toggle()
     }
 }
 

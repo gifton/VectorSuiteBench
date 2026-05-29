@@ -22,17 +22,32 @@ struct RunDetailView: View {
     let coordinator: RunStoreCoordinator
     let now: Date
 
+    /// Diff-mode toggle. When `true`, the body swaps to `DiffPaneView`
+    /// per locked decision §1.5/4 + Item 2c's "diff entry UX" Q&A
+    /// (replace body entirely, not overlay). Owned by `AppRoot` so the
+    /// toolbar button can flip it; passed in as a binding so this view
+    /// stays a pure consumer.
+    @Binding var isDiffMode: Bool
+    /// Sidebar-summary view of all runs. Threaded down for `DiffPaneView`
+    /// to drive its `RunPickerView`. Same data the sidebar consumes.
+    let summaries: [RunSummary]
+    /// Diff selection state — `AppRoot` owns the canonical instance so
+    /// it survives toggling diff mode off and on; passed in via the
+    /// Bindable seam so `RunPickerView` mutations propagate.
+    @Bindable var diffSelection: DiffSelection
+
     /// Cached document for the current `runID`. Re-loaded when `runID`
     /// changes (via `.task(id:)`). Optional because the load can fail
     /// or the runID can change mid-load.
     @State private var document: RunDocument?
     @State private var loadError: String?
 
-    /// Filter state shared with Item 3c's chart. Owned by `RunDetailView`
-    /// so swapping runs resets the filter — a filter that survived run
-    /// changes would silently drop rows when the user clicks a different
-    /// run that doesn't contain the previously-selected impl, which reads
-    /// as "the table is broken".
+    /// Filter state shared with Item 3c's chart AND with the Diff-mode
+    /// `DeltaTable` (Item 2b's `CaseTableFilter.apply(toDelta:)` seam).
+    /// Owned by `RunDetailView` so swapping runs resets the filter — a
+    /// filter that survived run changes would silently drop rows when
+    /// the user clicks a different run that doesn't contain the
+    /// previously-selected impl, which reads as "the table is broken".
     @State private var filter = CaseTableFilter()
 
     /// Body view mode. Defaults to `.table` per plan §3b — the
@@ -46,9 +61,19 @@ struct RunDetailView: View {
     /// drift if the builder ever became side-effecting.
     @State private var rows: [CaseRow] = []
 
-    init(runID: String, coordinator: RunStoreCoordinator, now: Date = Date()) {
+    init(
+        runID: String,
+        coordinator: RunStoreCoordinator,
+        isDiffMode: Binding<Bool>,
+        summaries: [RunSummary],
+        diffSelection: DiffSelection,
+        now: Date = Date()
+    ) {
         self.runID = runID
         self.coordinator = coordinator
+        self._isDiffMode = isDiffMode
+        self.summaries = summaries
+        self.diffSelection = diffSelection
         self.now = now
     }
 
@@ -76,13 +101,27 @@ struct RunDetailView: View {
     private func content(document: RunDocument) -> some View {
         VStack(spacing: 0) {
             RunSummaryHeader(document: document, now: now)
-            bodyToggle
-            Divider().background(VSB.Surface.hair)
-            switch bodyMode {
-            case .table:
-                CaseTable(rows: rows, filter: filter)
-            case .charts:
-                ChartsPane(rows: rows, filter: filter)
+            if isDiffMode {
+                // Diff mode replaces the body — per Item 2c's "diff
+                // entry UX" Q&A (replace, not overlay). The body-mode
+                // toggle (TABLE / CHARTS) is suppressed because neither
+                // applies; the diff toolbar inside DiffPaneView carries
+                // its own picker + Export Markdown.
+                DiffPaneView(
+                    selection: diffSelection,
+                    summaries: summaries,
+                    coordinator: coordinator,
+                    filter: filter
+                )
+            } else {
+                bodyToggle
+                Divider().background(VSB.Surface.hair)
+                switch bodyMode {
+                case .table:
+                    CaseTable(rows: rows, filter: filter)
+                case .charts:
+                    ChartsPane(rows: rows, filter: filter)
+                }
             }
         }
     }

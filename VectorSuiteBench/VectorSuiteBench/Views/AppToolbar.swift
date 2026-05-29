@@ -39,6 +39,13 @@ struct AppToolbar: ToolbarContent {
     /// run is in flight, per locked decision §4c). Wired by `AppRoot`
     /// to invoke `RunInvocation.cancel()`.
     let onCancel: () -> Void
+    /// Diff-mode flag — true while `RunDetailView` is showing
+    /// `DiffPaneView`. Drives the `⇋ Compare` button's
+    /// pressed-state styling.
+    let isDiffMode: Bool
+    /// Action for the `⇋ Compare` button. Wired by `AppRoot` to enter
+    /// or leave Diff mode (Item 2c).
+    let onToggleDiff: () -> Void
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
@@ -89,19 +96,26 @@ struct AppToolbar: ToolbarContent {
         .keyboardShortcut(".", modifiers: .command)
     }
 
-    /// **`⇋ Compare`** — wired in Phase 2.2. Diff two runs side-by-side
-    /// via the merged delta-table visual (locked decision §1.5/4).
-    /// `BenchKit.RunDiff` is already implemented; 2.2 just adds the
-    /// picker UI + diff view.
+    /// **`⇋ Compare`** — toggles `RunDetailView` between single-run
+    /// mode and Diff mode. Entering Diff mode auto-fills the
+    /// `DiffSelection`'s baseline as the next-older sibling of the
+    /// currently selected run (§1.5/5 + Item 2a Q&A). Click again
+    /// to exit. Enabled in every state — even with 0 or 1 runs, per
+    /// Item 2c's "no-comparable-runs" Q&A: a click enters Diff mode
+    /// and the body renders the §1.5/6 empty-state card. Discovers
+    /// the feature for new users before they have enough data for it.
     private var compareButton: some View {
-        Button {
-            // Wired in Phase 2.2 — opens diff picker.
-        } label: {
+        Button(action: onToggleDiff) {
             Label("Compare", systemImage: "arrow.left.arrow.right")
         }
-        .disabled(true)
-        .help("Diff two runs side-by-side (coming in Phase 2.2)")
+        .help(isDiffMode
+              ? "Exit Diff mode (return to single-run view)"
+              : "Diff two runs side-by-side")
         .keyboardShortcut("c", modifiers: [.command, .shift])
+        // Subtle pressed-state visual when active. SwiftUI's toolbar
+        // doesn't surface a "pressed" affordance on standard buttons,
+        // so we layer a faint accent tint on the label.
+        .foregroundStyle(isDiffMode ? VSB.Impl.vectorCore : VSB.Text.hi)
     }
 
     /// **`↓ Export CSV`** — wired in Phase 2.2 alongside Compare.
