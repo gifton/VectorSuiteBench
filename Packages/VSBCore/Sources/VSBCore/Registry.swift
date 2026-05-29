@@ -21,6 +21,7 @@ public enum VSBCoreRegistry {
     public static let families: [any WorkloadFamily] = [
         DotFamily(),
         L2DistanceFamily(),
+        CosineFamily(),
     ]
 
     /// All workloads as type-erased `RunnableWorkload`. Concrete types are
@@ -47,6 +48,12 @@ public enum VSBCoreRegistry {
     public static let simdL2Dist512 = SimdL2DistWorkload(n: 512)
     public static let vectorCoreOptimizedL2Dist512 = VectorCoreOptimizedL2DistWorkload<Vector512Optimized>()
     public static let vectorCoreOptimizedL2Dist1536 = VectorCoreOptimizedL2DistWorkload<Vector1536Optimized>()
+
+    public static let naiveCosine512 = NaiveCosineWorkload(n: 512)
+    public static let accelerateCosine512 = AccelerateCosineWorkload(n: 512)
+    public static let simdCosine512 = SimdCosineWorkload(n: 512)
+    public static let vectorCoreOptimizedCosine512 = VectorCoreOptimizedCosineWorkload<Vector512Optimized>()
+    public static let vectorCoreOptimizedCosine1536 = VectorCoreOptimizedCosineWorkload<Vector1536Optimized>()
 }
 
 /// Dot family — all variants of the dot product, across baseline impls
@@ -138,5 +145,45 @@ public struct L2DistanceFamily: WorkloadFamily {
 
         return all
         // Total: 15 + 2 = 17 L2Distance cases.
+    }
+}
+
+/// Cosine similarity family — `(a·b) / (‖a‖₂ · ‖b‖₂)`. Phase 2.2 Item 1b.
+///
+/// **VectorCore flavor coverage:** Optimized only. `Vector<D>` and
+/// `DynamicVector` do not expose `cosineSimilarity(to:)` (verified at
+/// Phase 2.2 Item 1b); only the `Vector{384,512,768,1536}Optimized` types
+/// do. Same omission rationale as `L2DistanceFamily` — synthesizing the
+/// missing flavors via `CosineDistance().distance(_,_)` would measure a
+/// different value space (distance = 1 − similarity, not similarity), so
+/// shipping it as a cosine-similarity case would be misleading.
+///
+/// **No api: raw | metric split.** Unlike dot — where `Vector.dot()` and
+/// `DotProductDistance.distance(_,_)` differ by a pure sign flip — cosine
+/// similarity and `CosineDistance.distance(_,_)` differ by a value
+/// transform (`1 − x`). That's a separate op shape, not a metric variant.
+/// Phase 2.2 ships similarity only; cosine distance, if benchmarked, gets
+/// its own family in a later phase.
+public struct CosineFamily: WorkloadFamily {
+    public init() {}
+    public var name: String { "cosine" }
+
+    public var workloads: [any RunnableWorkload] {
+        var all: [any RunnableWorkload] = []
+
+        // 1. Baseline (non-VectorCore) impls × 5 sizes = 15
+        for n in VSBCoreRegistry.baselineDotSizes {
+            all.append(NaiveCosineWorkload(n: n))
+            all.append(AccelerateCosineWorkload(n: n))
+            all.append(SimdCosineWorkload(n: n))
+        }
+
+        // 2. VectorCore-optimized at the dims VectorCore ships an
+        //    Optimized type for and we sweep: 512 and 1536.
+        all.append(VectorCoreOptimizedCosineWorkload<Vector512Optimized>())
+        all.append(VectorCoreOptimizedCosineWorkload<Vector1536Optimized>())
+
+        return all
+        // Total: 15 + 2 = 17 Cosine cases.
     }
 }

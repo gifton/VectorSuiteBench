@@ -64,3 +64,27 @@ extension Vector384Optimized: OptimizedL2VectorType {}
 extension Vector512Optimized: OptimizedL2VectorType {}
 extension Vector768Optimized: OptimizedL2VectorType {}
 extension Vector1536Optimized: OptimizedL2VectorType {}
+
+// MARK: - Cosine similarity refinement
+
+/// Per-op refinement of `OptimizedVectorType` for cosine similarity.
+/// Phase 2.2 Item 1b — only the Optimized vector types expose a typed
+/// `cosineSimilarity(to:)` API (Vector<D> and DynamicVector do not), so
+/// CosineFamily ships Optimized only; the Generic and Dynamic flavors are
+/// deliberately omitted (same gap and same rationale as
+/// `OptimizedL2VectorType`).
+///
+/// **Sign/value convention.** Returns the similarity in `[-1, 1]`, not the
+/// distance `1 - similarity`. Cosine distance is a value transform of
+/// similarity (not a sign flip like dot's metric variant), so we treat it
+/// as a separate op rather than an `api: metric` axis on cosine.
+public protocol OptimizedCosineVectorType: OptimizedVectorType {
+    /// Cosine similarity to another vector of the same type.
+    /// Wraps VectorCore's `cosineSimilarity(to:)`.
+    func cosineSimilarity(to other: Self) -> Float
+}
+
+extension Vector384Optimized: OptimizedCosineVectorType {}
+extension Vector512Optimized: OptimizedCosineVectorType {}
+extension Vector768Optimized: OptimizedCosineVectorType {}
+extension Vector1536Optimized: OptimizedCosineVectorType {}
