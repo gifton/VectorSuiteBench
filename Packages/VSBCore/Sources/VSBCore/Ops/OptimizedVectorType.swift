@@ -40,3 +40,27 @@ extension Vector768Optimized: OptimizedVectorType {
 extension Vector1536Optimized: OptimizedVectorType {
     public static var dim: Int { 1536 }
 }
+
+// MARK: - L2 squared-distance refinement
+
+/// Per-op refinement of `OptimizedVectorType` that adds the squared
+/// Euclidean distance method. Phase 2.2 Item 1a — only the Optimized
+/// vector types expose a typed `euclideanDistanceSquared(to:)` API
+/// (Vector<D> and DynamicVector do not), so the L2DistanceFamily ships
+/// the Optimized flavor only via this refinement; the Generic and
+/// Dynamic flavors are deliberately omitted.
+///
+/// Future per-op refinements (cosine, normalize, axpy, ...) follow the
+/// same pattern: a marker-protocol refinement plus retroconformances
+/// over whatever subset of VectorCore's Optimized types exposes the
+/// underlying kernel.
+public protocol OptimizedL2VectorType: OptimizedVectorType {
+    /// Squared Euclidean distance to another vector of the same type.
+    /// Wraps VectorCore's `euclideanDistanceSquared(to:)`.
+    func euclideanDistanceSquared(to other: Self) -> Float
+}
+
+extension Vector384Optimized: OptimizedL2VectorType {}
+extension Vector512Optimized: OptimizedL2VectorType {}
+extension Vector768Optimized: OptimizedL2VectorType {}
+extension Vector1536Optimized: OptimizedL2VectorType {}

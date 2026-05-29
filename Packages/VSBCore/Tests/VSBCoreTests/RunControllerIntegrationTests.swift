@@ -17,12 +17,17 @@ struct RunControllerIntegrationTests {
         defer { try? FileManager.default.removeItem(at: tmp) }
         let store = RunStore(rootURL: tmp)
 
-        // Take only the smallest baseline cases (N=64) so wall time stays
-        // well under the smoke budget. Three impls × N=64 = 3 cases.
+        // Take only the smallest baseline dot cases (N=64) so wall time
+        // stays well under the smoke budget. Three baseline impls × N=64 = 3
+        // cases. Restricted to op=.dot so subsequent op-family additions
+        // (l2dist in 2.2 Item 1a, cosine in 1b, etc.) don't perturb this
+        // integration test's case count.
         let filtered = VSBCoreRegistry.workloads.filter {
-            $0.identifier.shape == .vector(n: 64) && $0.identifier.impl != .vectorCore
+            $0.identifier.op == .dot
+                && $0.identifier.shape == .vector(n: 64)
+                && $0.identifier.impl != .vectorCore
         }
-        #expect(filtered.count == 3, "expected 3 baseline cases at N=64; got \(filtered.count)")
+        #expect(filtered.count == 3, "expected 3 baseline dot cases at N=64; got \(filtered.count)")
 
         let controller = RunController(
             registry: filtered,
@@ -81,7 +86,9 @@ struct RunControllerIntegrationTests {
         let store = RunStore(rootURL: tmp)
 
         let filtered = VSBCoreRegistry.workloads.filter {
-            $0.identifier.shape == .vector(n: 64) && $0.identifier.impl != .vectorCore
+            $0.identifier.op == .dot
+                && $0.identifier.shape == .vector(n: 64)
+                && $0.identifier.impl != .vectorCore
         }
         #expect(filtered.count >= 2)
 
