@@ -22,6 +22,7 @@ public enum VSBCoreRegistry {
         DotFamily(),
         L2DistanceFamily(),
         CosineFamily(),
+        NormalizeFamily(),
     ]
 
     /// All workloads as type-erased `RunnableWorkload`. Concrete types are
@@ -54,6 +55,15 @@ public enum VSBCoreRegistry {
     public static let simdCosine512 = SimdCosineWorkload(n: 512)
     public static let vectorCoreOptimizedCosine512 = VectorCoreOptimizedCosineWorkload<Vector512Optimized>()
     public static let vectorCoreOptimizedCosine1536 = VectorCoreOptimizedCosineWorkload<Vector1536Optimized>()
+
+    public static let naiveNormalize512 = NaiveNormalizeWorkload(n: 512)
+    public static let accelerateNormalize512 = AccelerateNormalizeWorkload(n: 512)
+    public static let simdNormalize512 = SimdNormalizeWorkload(n: 512)
+    public static let vectorCoreOptimizedNormalize512 = VectorCoreOptimizedNormalizeWorkload<Vector512Optimized>()
+    public static let vectorCoreOptimizedNormalize1536 = VectorCoreOptimizedNormalizeWorkload<Vector1536Optimized>()
+    public static let vectorCoreGenericNormalize512 = VectorCoreGenericNormalizeWorkload<Dim512>()
+    public static let vectorCoreDynamicNormalize512 = VectorCoreDynamicNormalizeWorkload(n: 512)
+    public static let vectorCoreDynamicNormalize4096 = VectorCoreDynamicNormalizeWorkload(n: 4096)
 }
 
 /// Dot family — all variants of the dot product, across baseline impls
@@ -185,5 +195,57 @@ public struct CosineFamily: WorkloadFamily {
 
         return all
         // Total: 15 + 2 = 17 Cosine cases.
+    }
+}
+
+/// Out-of-place L2 normalize family — `aᵢ ← aᵢ / ‖a‖₂` returning a fresh
+/// vector. Phase 2.2 Item 1c.
+///
+/// **VectorCore flavor coverage:** all three (Optimized + Generic +
+/// Dynamic). Unlike L2DistanceFamily and CosineFamily — where the Generic
+/// and Dynamic paths lack a typed API — normalize ships on every flavor
+/// via these idiomatic methods:
+/// - Optimized → `normalizedUnchecked()` (skips zero-check, returns Self).
+/// - Generic   → `normalizedFast()` (reciprocal multiply, returns Self).
+/// - Dynamic   → `try! normalized().get()` (Result-returning; no
+///   Self-returning variant exists).
+///
+/// Per-flavor API divergence is deliberate (Item 1c locked decision —
+/// "most idiomatic per flavor"). Each method is the canonical user-facing
+/// call on that vector type; using a forcibly-uniform API everywhere
+/// would either bias the Generic case (missing its fast path) or trade
+/// coverage (dropping Dynamic entirely).
+public struct NormalizeFamily: WorkloadFamily {
+    public init() {}
+    public var name: String { "normalize" }
+
+    public var workloads: [any RunnableWorkload] {
+        var all: [any RunnableWorkload] = []
+
+        // 1. Baseline (non-VectorCore) impls × 5 sizes = 15
+        for n in VSBCoreRegistry.baselineDotSizes {
+            all.append(NaiveNormalizeWorkload(n: n))
+            all.append(AccelerateNormalizeWorkload(n: n))
+            all.append(SimdNormalizeWorkload(n: n))
+        }
+
+        // 2. VectorCore-optimized at {512, 1536} = 2
+        all.append(VectorCoreOptimizedNormalizeWorkload<Vector512Optimized>())
+        all.append(VectorCoreOptimizedNormalizeWorkload<Vector1536Optimized>())
+
+        // 3. VectorCore-generic across every static Dim VectorCore declares
+        //    of our 5-size set: 64, 256, 512, 1536 (no Dim4096) = 4
+        all.append(VectorCoreGenericNormalizeWorkload<Dim64>())
+        all.append(VectorCoreGenericNormalizeWorkload<Dim256>())
+        all.append(VectorCoreGenericNormalizeWorkload<Dim512>())
+        all.append(VectorCoreGenericNormalizeWorkload<Dim1536>())
+
+        // 4. VectorCore-dynamic across every size = 5
+        for n in VSBCoreRegistry.baselineDotSizes {
+            all.append(VectorCoreDynamicNormalizeWorkload(n: n))
+        }
+
+        return all
+        // Total: 15 + 2 + 4 + 5 = 26 Normalize cases.
     }
 }

@@ -88,3 +88,37 @@ extension Vector384Optimized: OptimizedCosineVectorType {}
 extension Vector512Optimized: OptimizedCosineVectorType {}
 extension Vector768Optimized: OptimizedCosineVectorType {}
 extension Vector1536Optimized: OptimizedCosineVectorType {}
+
+// MARK: - Normalize refinement (Optimized — unchecked fast path)
+
+/// Per-op refinement of `OptimizedVectorType` for out-of-place L2
+/// normalize. Phase 2.2 Item 1c — Optimized vector types expose
+/// `normalizedUnchecked()` returning `Self` directly (bypassing the
+/// zero-vector check). This is the canonical hot-path Optimized API, used
+/// here on uniformly-random non-zero input so the unchecked variant is
+/// safe.
+///
+/// **Per-flavor API divergence**: unlike L2 and Cosine (where only
+/// Optimized has a typed API), every flavor exposes normalize — but
+/// through different idiomatic methods. Optimized → `normalizedUnchecked`,
+/// Generic → `normalizedFast`, Dynamic → `try! normalized().get()`. This
+/// refinement protocol covers only the Optimized path; the Generic and
+/// Dynamic workloads call their methods directly without a marker
+/// protocol (their methods aren't shared across flavors so a refinement
+/// gains nothing).
+public protocol OptimizedNormalizeVectorType: OptimizedVectorType {
+    /// Out-of-place L2 normalize, bypassing zero-vector check for
+    /// performance. Wraps VectorCore's `normalizedUnchecked()`.
+    func normalizedUnchecked() -> Self
+
+    /// Flatten this typed vector into a `[Float]` buffer. Used by the
+    /// normalize oracle's per-element compare closure (runs once per case
+    /// at verification time, outside the timing window). Maps to
+    /// VectorCore's `toArray() -> [Scalar]` where Scalar == Float.
+    func toArray() -> [Float]
+}
+
+extension Vector384Optimized: OptimizedNormalizeVectorType {}
+extension Vector512Optimized: OptimizedNormalizeVectorType {}
+extension Vector768Optimized: OptimizedNormalizeVectorType {}
+extension Vector1536Optimized: OptimizedNormalizeVectorType {}
