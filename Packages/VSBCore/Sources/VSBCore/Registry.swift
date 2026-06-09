@@ -23,6 +23,7 @@ public enum VSBCoreRegistry {
         L2DistanceFamily(),
         CosineFamily(),
         NormalizeFamily(),
+        NormalizeInPlaceFamily(),
     ]
 
     /// All workloads as type-erased `RunnableWorkload`. Concrete types are
@@ -64,6 +65,10 @@ public enum VSBCoreRegistry {
     public static let vectorCoreGenericNormalize512 = VectorCoreGenericNormalizeWorkload<Dim512>()
     public static let vectorCoreDynamicNormalize512 = VectorCoreDynamicNormalizeWorkload(n: 512)
     public static let vectorCoreDynamicNormalize4096 = VectorCoreDynamicNormalizeWorkload(n: 4096)
+
+    public static let naiveNormalizeInPlace512 = NaiveNormalizeInPlaceWorkload(n: 512)
+    public static let accelerateNormalizeInPlace512 = AccelerateNormalizeInPlaceWorkload(n: 512)
+    public static let vectorCoreGenericNormalizeInPlace512 = VectorCoreGenericNormalizeInPlaceWorkload<Dim512>()
 }
 
 /// Dot family — all variants of the dot product, across baseline impls

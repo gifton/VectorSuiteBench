@@ -117,10 +117,16 @@ struct NormalizeWorkloadTests {
 
     // MARK: - Registry shape
 
-    @Test("NormalizeFamily contributes 26 normalize cases")
+    @Test("NormalizeFamily contributes 26 OOP normalize cases")
     func normalizeCaseCount() {
-        let cases = VSBCoreRegistry.workloads.filter { $0.identifier.op == .normalize }
-        #expect(cases.count == 26, Comment(rawValue: "expected 26 normalize cases; got \(cases.count)"))
+        // Item 3a added NormalizeInPlaceFamily whose cases also live
+        // under op=.normalize but are disambiguated by
+        // params["inplace"]=="true". The OOP family's count is asserted
+        // by excluding the IP cases — both filtered checks must hold
+        // for the registry to be self-consistent.
+        let allNormalize = VSBCoreRegistry.workloads.filter { $0.identifier.op == .normalize }
+        let oop = allNormalize.filter { $0.identifier.params["inplace"] != "true" }
+        #expect(oop.count == 26, Comment(rawValue: "expected 26 OOP normalize cases; got \(oop.count)"))
     }
 
     @Test("All registered workloads (dot + l2dist + cosine + normalize) produce distinct WorkloadIDs")
